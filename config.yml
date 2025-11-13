@@ -1,0 +1,55 @@
+collection_period:
+  recent_hours: 24
+rss_sources:
+  - name: BlockMedia
+    url: https://www.blockmedia.co.kr/feed
+    priority: 1.2
+    timezone: 9
+    max_articles: 100
+    hours_back: 24
+  - name: CoinDesk Korea
+    url: https://www.coindeskkorea.com/feed
+    priority: 1.1
+    timezone: 9
+    max_articles: 100
+    hours_back: 24
+
+telegram_sources:
+  # - name: Crypto News Channel
+  #   channel_id: '@cryptonews'
+  #   auth_method: bot_api
+  #   bot_token: YOUR_BOT_TOKEN
+  #   timezone: 9
+  #   max_messages: 100
+  - name: BithumbExchangeData
+    auth_method: mtproto
+    channel_id: BithumbExchangeData
+    tg_cred_id: eric
+    session_file: secrets\telegram_sessions\tg_cred_eric.session
+
+llm:
+  model: gemini-2.5-flash # 또는 "flash" 별칭 사용 가능, Pro 모델은 "gemini-2.5-pro" 또는 "pro"
+  provider: google
+  max_tokens: 8000 # Thinking 기능으로 인해 reasoning 토큰이 많이 사용되므로 증가 (기존: 4000)
+  temperature: 0.1
+  chunk_size: 50000
+  parallel_concurrency: 3 # 동시 실행 가능한 청크 처리 수 (0이면 무제한, 기본값: 3). API rate limit 회피를 위해 제한 권장
+
+normalization:
+  embedding_threshold: 0.85
+  dbscan_min_samples: 2
+  llm_verification_enabled: true
+  llm_verification_top_n: 20
+  embedding_provider: google # google | openai | keybert
+  embedding_model: models/text-embedding-004 # google: models/text-embedding-004, openai: text-embedding-3-large
+  # embedding_api_key: ""  # Gemini API 키(선택). 미설정 시 GOOGLE_API_KEY/GEMINI_API_KEY 환경변수 사용
+  # openai_api_key: ""  # OpenAI API 키(선택). 미설정 시 OPENAI_API_KEY 환경변수 사용
+
+output:
+  top_keywords_count: 10
+  summary_paragraphs: 4
+  log_level: INFO
+  log_filename_strategy: timestamp
+  log_fixed_window_days: 10
+  display_timezone: 9 # UTC offset (기본값: 9 = KST)
+  output_dir: output
