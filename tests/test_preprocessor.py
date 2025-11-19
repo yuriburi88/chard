@@ -7,10 +7,15 @@
 - 토큰 길이 제한
 """
 
-import pytest
+import logging
+from typing import List
 from datetime import datetime, timezone
-from src.preprocessor import Preprocessor, PreprocessingConfig
+
+import pytest
+
 from src.collectors.models import Article, CollectedItem
+from src.preprocessor import Preprocessor, PreprocessingConfig
+from src.normalizer import DataNormalizer
 
 
 class TestPreprocessor:
@@ -216,6 +221,99 @@ class TestPreprocessor:
         sources = [item.source_name for item in result]
         assert "BlockMedia" in sources
     
+    @pytest.mark.asyncio
+    async def test_preprocess_collected_items_split_long_messages(self, caplog):
+        """장문 CollectedItem 분할 전처리 테스트"""
+        config = PreprocessingConfig(
+            language_detection_enabled=False,
+            spam_filter_enabled=False,
+            token_limit_enabled=True,
+            max_tokens_per_item=120,
+            split_long_messages=True,
+            max_tokens_per_segment=40,
+            segment_overlap_tokens=10
+        )
+        preprocessor = Preprocessor(config)
+
+        long_text = "비트코인 가격이 꾸준히 상승하고 있습니다. " * 50
+        item = CollectedItem(
+            source_type="telegram",
+            source_name="CryptoChannel",
+            timestamp=datetime.now(timezone.utc),
+            text=long_text,
+            metadata={"message_id": 123456}
+        )
+
+        with caplog.at_level(logging.INFO, logger="src.preprocessor"):
+            result = await preprocessor.preprocess_collected_items([item])
+
+        assert len(result) > 1
+        normalized_long_text = preprocessor._normalize_text(long_text)
+        original_total_tokens = len(preprocessor.token_encoder.encode(normalized_long_text))
+        effective_overlap = preprocessor._resolve_overlap_tokens(config.max_tokens_per_segment)
+        previous_range_end = None
+
+        total_segment_tokens = 0
+
+        for index, segment in enumerate(result):
+            segment_tokens = len(preprocessor.token_encoder.encode(segment.text))
+            assert segment_tokens <= config.max_tokens_per_segment
+            assert segment.metadata["original_message_id"] == item.metadata["message_id"]
+            assert segment.metadata["message_id"] == item.metadata["message_id"]
+            assert segment.metadata["segment_index"] == index
+            assert segment.metadata["segment_count"] == len(result)
+            assert "segment_range_tokens" in segment.metadata
+            range_info = segment.metadata["segment_range_tokens"]
+            assert range_info["start"] >= 0
+            assert range_info["end"] > range_info["start"]
+            if index == 0:
+                assert range_info["start"] == 0
+            else:
+                assert range_info["start"] == max(previous_range_end - effective_overlap, 0)
+            previous_range_end = range_info["end"]
+            assert segment.source_name == item.source_name
+
+            total_segment_tokens += segment_tokens
+
+        assert previous_range_end == original_total_tokens
+        assert total_segment_tokens >= original_total_tokens
+
+        stats_log = next(
+            (
+                message
+                for message in caplog.messages
+                if "분할세그먼트" in message
+            ),
+            ""
+        )
+        assert f"분할세그먼트={len(result)}" in stats_log
+    
+    @pytest.mark.asyncio
+    async def test_preprocess_collected_items_split_disabled(self):
+        """장문 분할 비활성화 시 토큰 초과 항목 제외 테스트"""
+        config = PreprocessingConfig(
+            language_detection_enabled=False,
+            spam_filter_enabled=False,
+            token_limit_enabled=True,
+            max_tokens_per_item=120,
+            split_long_messages=False,
+            max_tokens_per_segment=40
+        )
+        preprocessor = Preprocessor(config)
+
+        long_text = "이더리움 네트워크 활동이 증가하고 있습니다. " * 50
+        item = CollectedItem(
+            source_type="telegram",
+            source_name="AltcoinChannel",
+            timestamp=datetime.now(timezone.utc),
+            text=long_text,
+            metadata={"message_id": 987654}
+        )
+
+        result = await preprocessor.preprocess_collected_items([item])
+
+        assert result == []
+    
     def test_normalize_text(self, preprocessor):
         """텍스트 정규화 테스트"""
         # 연속된 공백 정규화
@@ -253,6 +351,136 @@ class TestPreprocessor:
         # 잘린 텍스트의 토큰 수는 max_tokens 이하여야 함
         truncated_tokens = preprocessor.count_tokens(truncated)
         assert truncated_tokens <= max_tokens
+    
+    def test_split_text_to_segments_token_based(self):
+        """토큰 기반 세그먼트 분할 테스트"""
+        config = PreprocessingConfig(
+            language_detection_enabled=False,
+            spam_filter_enabled=False,
+            token_limit_enabled=False,
+            split_long_messages=True,
+            max_tokens_per_segment=10,
+            segment_overlap_tokens=0
+        )
+        preprocessor = Preprocessor(config)
+
+        text = " ".join(["segment"] * 100)
+
+        segments = preprocessor._split_text_to_segments(text)
+
+        assert len(segments) > 1
+
+        for index, segment in enumerate(segments, start=1):
+            token_count = len(preprocessor.token_encoder.encode(segment))
+            assert 0 < token_count <= config.max_tokens_per_segment, (
+                f"세그먼트 {index} 토큰 수가 제한을 초과했습니다: {token_count}"
+            )
+
+        reconstructed = "".join(segments)
+        original_tokens = preprocessor.token_encoder.encode(text)
+        reconstructed_tokens = preprocessor.token_encoder.encode(reconstructed)
+
+        assert reconstructed_tokens == original_tokens
+
+    def test_split_text_to_segments_with_overlap(self):
+        """토큰 기반 세그먼트 오버랩 테스트"""
+        config = PreprocessingConfig(
+            language_detection_enabled=False,
+            spam_filter_enabled=False,
+            token_limit_enabled=False,
+            split_long_messages=True,
+            max_tokens_per_segment=30,
+            segment_overlap_tokens=5
+        )
+        preprocessor = Preprocessor(config)
+
+        text = " ".join(["overlap"] * 120)
+
+        segments = preprocessor._split_text_to_segments(text)
+
+        assert len(segments) > 1
+
+        overlap_tokens = preprocessor.config.segment_overlap_tokens
+        segment_tokens = [
+            preprocessor.token_encoder.encode(segment) for segment in segments
+        ]
+
+        reconstructed_tokens: List[int] = []
+
+        for index, tokens in enumerate(segment_tokens):
+            if index == 0:
+                reconstructed_tokens.extend(tokens)
+
+                continue
+
+            reconstructed_tokens.extend(tokens[overlap_tokens:])
+
+        original_tokens = preprocessor.token_encoder.encode(text)
+
+        assert reconstructed_tokens == original_tokens
+
+    def test_split_text_to_segments_without_encoder(self):
+        """토큰 인코더 미사용 시 문자 기반 분할 테스트"""
+        config = PreprocessingConfig(
+            language_detection_enabled=False,
+            spam_filter_enabled=False,
+            token_limit_enabled=False,
+            split_long_messages=True,
+            max_tokens_per_segment=5,
+            segment_overlap_tokens=1,
+            token_encoding="invalid-encoding"
+        )
+        preprocessor = Preprocessor(config)
+
+        assert preprocessor.token_encoder is None
+
+        text = "abcdefghijklmnopqrstuvwxyz" * 4
+
+        segments = preprocessor._split_text_to_segments(text)
+
+        assert len(segments) > 1
+
+        overlap_chars = preprocessor.config.segment_overlap_tokens * 4
+        reconstructed = segments[0]
+
+        for segment in segments[1:]:
+            reconstructed += segment[overlap_chars:]
+
+        assert reconstructed == text
+    
+    def test_data_normalizer_preserves_segmentation_metadata(self):
+        """DataNormalizer가 분할 메타데이터를 유지하는지 테스트"""
+        metadata = {
+            "title": "Segmented Message",
+            "message_id": 42,
+            "original_message_id": "42",
+            "segment_index": 1,
+            "segment_count": 3,
+            "segment_range_tokens": {"start": 10, "end": 20},
+            "channel_name": "CryptoChannel",
+        }
+        
+        item = CollectedItem(
+            source_type="telegram",
+            source_name="CryptoChannel",
+            timestamp=datetime.now(timezone.utc),
+            text="segment text",
+            metadata=metadata
+        )
+        
+        normalized = DataNormalizer.to_dict_format(item)
+        meta = normalized["meta"]
+        
+        assert meta["title"] == metadata["title"]
+        assert meta["message_id"] == metadata["message_id"]
+        assert meta["original_message_id"] == metadata["original_message_id"]
+        assert meta["segment_index"] == metadata["segment_index"]
+        assert meta["segment_count"] == metadata["segment_count"]
+        assert meta["segment_range_tokens"] == metadata["segment_range_tokens"]
+        # 채널 정보는 channel 필드로 노출
+        assert meta["channel"] == metadata["channel_name"]
+        # 원본 메타데이터의 channel_name도 유지
+        assert meta["channel_name"] == metadata["channel_name"]
     
     @pytest.mark.asyncio
     async def test_preprocess_empty_list(self, preprocessor):

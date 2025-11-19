@@ -232,16 +232,20 @@ class RSSCollector:
             logger.debug(f"[RSS 시간 필터링] 발행 시각이 최소 시각보다 이전입니다. 제목: {title[:50]}..., 발행: {published_at.isoformat()}, 최소: {min_published.isoformat()}")
             return None
         
-        # 본문 추출
-        content = self._extract_content(entry)
-        if not content or not content.strip():
-            logger.warning(f"[RSS 엔트리 파싱] 본문이 비어있어 스킵합니다. 제목: {title[:50]}...")
-            return None
-        
         # 요약 추출
         description = self._get_entry_value(entry, 'summary', '').strip()
         if description:
             description = html.unescape(description)
+        
+        # 본문 추출: content 필드를 우선 사용하고, 없을 경우 요약을 사용
+        content = self._extract_content(entry)
+        if not content or not content.strip():
+            if description:
+                content = description
+                logger.debug(f"[RSS 엔트리 파싱] 요약(summary)을 본문으로 사용합니다. 제목: {title[:50]}...")
+            else:
+                logger.warning(f"[RSS 엔트리 파싱] 본문이 비어있어 스킵합니다. 제목: {title[:50]}...")
+                return None
         
         # 작성자 추출
         author = self._get_entry_value(entry, 'author', '').strip()

@@ -119,6 +119,11 @@ class AppConfig:
     
     # 출력 설정
     output: OutputConfig = field(default_factory=OutputConfig)
+    
+    # 전처리 설정
+    split_long_messages: bool = True
+    max_tokens_per_segment: int = 4000
+    segment_overlap_tokens: int = 200
 
 
 class ConfigManager:
@@ -255,6 +260,19 @@ class ConfigManager:
                 errors.append("normalization.embedding_threshold는 0.0과 1.0 사이여야 합니다.")
             if "llm_verification_top_n" in norm and norm["llm_verification_top_n"] <= 0:
                 errors.append("normalization.llm_verification_top_n은 0보다 커야 합니다.")
+        
+        # 전처리 설정 검증
+        if "preprocessing" in config:
+            preprocessing = config["preprocessing"]
+            if "max_tokens_per_segment" in preprocessing and preprocessing["max_tokens_per_segment"] <= 0:
+                errors.append("preprocessing.max_tokens_per_segment는 0보다 커야 합니다.")
+            if "segment_overlap_tokens" in preprocessing and preprocessing["segment_overlap_tokens"] < 0:
+                errors.append("preprocessing.segment_overlap_tokens는 0 이상이어야 합니다.")
+            if (
+                preprocessing.get("segment_overlap_tokens", 0) >= preprocessing.get("max_tokens_per_segment", 4000)
+                and preprocessing.get("max_tokens_per_segment", 4000) > 0
+            ):
+                errors.append("preprocessing.segment_overlap_tokens는 preprocessing.max_tokens_per_segment보다 작아야 합니다.")
         
         # 출력 설정 검증
         if "output" in config:
@@ -400,6 +418,12 @@ class ConfigManager:
             output_dir=output_config.get("output_dir", "output")
         )
         
+        # 전처리 설정 파싱
+        preprocessing_config = config.get("preprocessing", {})
+        split_long_messages = preprocessing_config.get("split_long_messages", True)
+        max_tokens_per_segment = preprocessing_config.get("max_tokens_per_segment", 4000)
+        segment_overlap_tokens = preprocessing_config.get("segment_overlap_tokens", 200)
+        
         return AppConfig(
             gemini_api_key=env_vars["GEMINI_API_KEY"],
             collection_period=collection_period,
@@ -407,7 +431,10 @@ class ConfigManager:
             telegram_sources=telegram_sources,
             llm=llm,
             normalization=normalization,
-            output=output
+            output=output,
+            split_long_messages=split_long_messages,
+            max_tokens_per_segment=max_tokens_per_segment,
+            segment_overlap_tokens=segment_overlap_tokens
         )
     
     def load(self) -> AppConfig:

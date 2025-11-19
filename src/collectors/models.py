@@ -8,11 +8,12 @@ RSS 및 텔레그램 수집기에서 사용하는 데이터 모델을 정의합�
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Union
 from datetime import datetime
 import hashlib
 
-MetadataValue = str | int | float | bool | List[str] | List[int] | None
+SegmentRangeTokens = Dict[str, int]
+MetadataValue = Union[str, int, float, bool, List[str], List[int], SegmentRangeTokens, None]
 
 
 @dataclass
@@ -276,7 +277,7 @@ class CollectedItem:
     source_name: str  # 데이터 출처 이름 (RSS 피드 이름 또는 텔레그램 채널 이름)
     timestamp: datetime  # 데이터 타임스탬프 (UTC)
     text: str  # 본문 텍스트
-    metadata: Dict[str, MetadataValue] = field(default_factory=dict)  # 부가 메타데이터
+    metadata: Dict[str, MetadataValue] = field(default_factory=dict)  # 부가 메타데이터 (예: message_id, segment_range_tokens 등)
 
     def __post_init__(self) -> None:
         """데이터 검증 및 정규화"""

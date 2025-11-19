@@ -21,9 +21,9 @@ telegram_sources:
   #   bot_token: YOUR_BOT_TOKEN
   #   timezone: 9
   #   max_messages: 100
-  - name: BithumbExchangeData
+  - name: WifiMoney
     auth_method: mtproto
-    channel_id: BithumbExchangeData
+    channel_id: wifistoic
     tg_cred_id: eric
     session_file: secrets\telegram_sessions\tg_cred_eric.session
 
@@ -34,6 +34,14 @@ llm:
   temperature: 0.1
   chunk_size: 50000
   parallel_concurrency: 3 # 동시 실행 가능한 청크 처리 수 (0이면 무제한, 기본값: 3). API rate limit 회피를 위해 제한 권장
+
+preprocessing:
+  # 긴 텔레그램 메시지를 세그먼트로 분할할지 여부 (기본: true)
+  split_long_messages: true
+  # 분할된 세그먼트당 허용 토큰 수 (기본값: 4000)
+  max_tokens_per_segment: 4000
+  # 세그먼트 간 문맥 유지를 위한 토큰 오버랩 크기 (기본값: 200)
+  segment_overlap_tokens: 200
 
 normalization:
   embedding_threshold: 0.85

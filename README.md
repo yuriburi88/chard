@@ -5,7 +5,7 @@ RSS 피드와 텔레그램 채팅 데이터를 수집하여 Gemini LLM을 활용
 ## 프로젝트 구조
 
 ```
-rex/
+chard/
 ├── src/
 │   ├── collectors/          # 데이터 수집 모듈 (RSS, 텔레그램)
 │   ├── workflows/           # LangGraph 워크플로
@@ -13,7 +13,6 @@ rex/
 │   │   └── normalization/  # 키워드 정규화
 │   └── report/             # 리포트 생성
 ├── tests/                  # 테스트 모듈
-├── dev-doc/                # 개발 문서
 ├── output/                 # 실행 결과 저장 디렉터리
 ├── main.py                 # CLI 엔트리 포인트
 ├── config.yml              # 설정 파일 (샘플)
@@ -125,4 +124,8 @@ python main.py --config config.yml
 - [PRD](./dev-doc/prd-digital-asset-narrative-extractor.md): 전체 프로젝트 요구사항
 - [LLM 키워드 분석 파이프라인](./dev-doc/llm-keyword-analysis-pipeline.md): LangGraph 워크플로 설계
 - [Tasks](./tasks/tasks-prd-digital-asset-narrative-extractor.md): 개발 태스크 목록
+
+## 변경 로그
+
+- **2025-11-13**: 텔레그램 장문 메시지 분할 옵션(`split_long_messages`, `max_tokens_per_segment`, `segment_overlap_tokens`)을 추가하고 설정/사용자 가이드를 갱신했습니다. 세그먼트 메타데이터가 Stage 4 분석까지 유지되도록 정규화 로직을 보강했습니다.
 

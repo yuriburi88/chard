@@ -224,4 +224,85 @@ class TestDataNormalizer:
         messages = []
         results = DataNormalizer.normalize_telegram_messages(messages)
         assert results == []
+    
+    def test_to_dict_format_filters_none_values(self):
+        """None 값이 메타데이터에 포함된 경우 필터링되는지 테스트"""
+        # title과 url이 None인 경우
+        item = CollectedItem(
+            source_type="rss",
+            source_name="TestSource",
+            timestamp=datetime.now(timezone.utc),
+            text="Test content",
+            metadata={
+                "title": None,
+                "url": None,
+                "author": "Test Author",
+                "valid_field": "valid_value"
+            }
+        )
+        
+        result = DataNormalizer.to_dict_format(item)
+        meta = result["meta"]
+        
+        # None 값은 제외되어야 함
+        assert "title" not in meta
+        assert "url" not in meta
+        # 유효한 값은 포함되어야 함
+        assert "valid_field" in meta
+        assert meta["valid_field"] == "valid_value"
+    
+    def test_to_dict_format_filters_none_channel_values(self):
+        """텔레그램 채널 정보가 None인 경우 필터링되는지 테스트"""
+        # channel_name과 channel_id가 None인 경우
+        item = CollectedItem(
+            source_type="telegram",
+            source_name="TestChannel",
+            timestamp=datetime.now(timezone.utc),
+            text="Test message",
+            metadata={
+                "channel_name": None,
+                "channel_id": None,
+                "message_id": 12345,
+                "valid_field": "valid_value"
+            }
+        )
+        
+        result = DataNormalizer.to_dict_format(item)
+        meta = result["meta"]
+        
+        # None 값은 제외되어야 함
+        assert "channel" not in meta
+        assert "channel_name" not in meta
+        assert "channel_id" not in meta
+        # 유효한 값은 포함되어야 함
+        assert "message_id" in meta
+        assert meta["message_id"] == 12345
+        assert "valid_field" in meta
+        assert meta["valid_field"] == "valid_value"
+    
+    def test_to_dict_format_handles_partial_none_values(self):
+        """일부 필드만 None인 경우 올바르게 처리되는지 테스트"""
+        # title은 None이지만 url은 유효한 경우
+        item = CollectedItem(
+            source_type="rss",
+            source_name="TestSource",
+            timestamp=datetime.now(timezone.utc),
+            text="Test content",
+            metadata={
+                "title": None,
+                "url": "https://example.com",
+                "valid_field": "valid_value"
+            }
+        )
+        
+        result = DataNormalizer.to_dict_format(item)
+        meta = result["meta"]
+        
+        # None 값은 제외되어야 함
+        assert "title" not in meta
+        # 유효한 값은 포함되어야 함
+        assert "url" in meta
+        assert meta["url"] == "https://example.com"
+        assert "valid_field" in meta
+        assert meta["valid_field"] == "valid_value"
 

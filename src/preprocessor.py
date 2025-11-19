@@ -21,7 +21,7 @@ except ImportError:
     logging.warning("langdetect가 설치되지 않았습니다. 언어 감지 기능이 비활성화됩니다.")
 
 import tiktoken
-from src.collectors.models import Article, TelegramMessage, CollectedItem
+from src.collectors.models import Article, TelegramMessage, CollectedItem, MetadataValue
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,11 @@ class PreprocessingConfig:
     token_limit_enabled: bool = True
     max_tokens_per_item: int = 50000  # 항목당 최대 토큰 수
     token_encoding: str = "cl100k_base"  # tiktoken 인코딩 (GPT-4/Gemini 호환)
+    
+    # 장문 메시지 분할 설정
+    split_long_messages: bool = True  # 장문 메시지 분할 기능 토글
+    max_tokens_per_segment: int = 4000  # 분할된 세그먼트당 최대 토큰 수
+    segment_overlap_tokens: int = 200  # 세그먼트 간 토큰 오버랩 크기
     
     # 텍스트 정규화 설정
     normalize_whitespace: bool = True  # 연속된 공백 정규화
@@ -90,6 +95,12 @@ class Preprocessor:
         if self.config.language_detection_enabled and not LANGDETECT_AVAILABLE:
             logger.warning("[Preprocessor] langdetect가 설치되지 않아 언어 감지가 비활성화됩니다.")
             self.config.language_detection_enabled = False
+
+        # 장문 메시지 분할 설정 로깅
+        self._log_segmentation_config()
+
+        # 장문 메시지 분할 설정 검증
+        self._validate_segmentation_config()
     
     async def preprocess_articles(
         self,
@@ -215,6 +226,8 @@ class Preprocessor:
             "spam_filtered": 0,
             "token_filtered": 0,
             "length_filtered": 0,
+            "split_replaced": 0,
+            "split_segments": 0,
             "passed": 0
         }
         
@@ -258,7 +271,37 @@ class Preprocessor:
                 if self.config.token_limit_enabled and self.token_encoder:
                     token_count = len(self.token_encoder.encode(normalized_text))
                     if token_count > self.config.max_tokens_per_item:
-                        logger.debug(f"[Preprocessor] 토큰 제한 초과 제외: source={item.source_name}, 토큰={token_count}")
+                        if self.config.split_long_messages:
+                            split_items = self._split_collected_item(
+                                original_item=item,
+                                normalized_text=normalized_text,
+                                token_count=token_count
+                            )
+
+                            if not split_items:
+                                logger.warning(
+                                    "[Preprocessor] 토큰 제한 초과 항목 분할 실패: "
+                                    f"source={item.source_name}, token_count={token_count}"
+                                )
+                                stats["token_filtered"] += 1
+                                continue
+
+                            processed_items.extend(split_items)
+                            stats["split_replaced"] += 1
+                            stats["split_segments"] += len(split_items)
+
+                            logger.info(
+                                "[Preprocessor] 토큰 제한 초과 항목 분할 완료: "
+                                f"source={item.source_name}, "
+                                f"segment_count={len(split_items)}, "
+                                f"original_token_count={token_count}"
+                            )
+                            stats["passed"] += len(split_items)
+                            continue
+
+                        logger.debug(
+                            f"[Preprocessor] 토큰 제한 초과 제외: source={item.source_name}, 토큰={token_count}"
+                        )
                         stats["token_filtered"] += 1
                         continue
                 
@@ -283,10 +326,163 @@ class Preprocessor:
             f"[Preprocessor] CollectedItem 전처리 완료: "
             f"전체={stats['total']}, 통과={stats['passed']}, "
             f"언어필터={stats['language_filtered']}, 스팸필터={stats['spam_filtered']}, "
-            f"토큰필터={stats['token_filtered']}, 길이필터={stats['length_filtered']}"
+            f"토큰필터={stats['token_filtered']}, 길이필터={stats['length_filtered']}, "
+            f"분할대체={stats['split_replaced']}, 분할세그먼트={stats['split_segments']}"
         )
         
         return processed_items
+    
+    def _split_collected_item(
+        self,
+        original_item: CollectedItem,
+        normalized_text: str,
+        token_count: int
+    ) -> List[CollectedItem]:
+        """
+        토큰 제한을 초과한 CollectedItem을 세그먼트로 분할합니다.
+        
+        Args:
+            original_item: 분할 대상 CollectedItem
+            normalized_text: 전처리된 텍스트
+            token_count: 원본 텍스트의 토큰 수
+        
+        Returns:
+            분할된 CollectedItem 리스트
+        """
+        try:
+            segments = self._split_text_to_segments(
+                text=normalized_text,
+                max_tokens=self.config.max_tokens_per_segment
+            )
+            boundaries = (
+                self._segment_boundaries
+                if hasattr(self, "_segment_boundaries")
+                else []
+            )
+        except Exception as error:
+            logger.error(
+                "[Preprocessor] CollectedItem 분할 중 오류 발생: "
+                f"source={original_item.source_name}, error={error}"
+            )
+            return []
+
+        if not segments:
+            logger.warning(
+                "[Preprocessor] CollectedItem 분할 결과가 비어 있습니다: "
+                f"source={original_item.source_name}, token_count={token_count}"
+            )
+            return []
+
+        original_id = self._extract_original_identifier(original_item)
+        total_segments = len(segments)
+        overlap_tokens = self._resolve_overlap_tokens(self.config.max_tokens_per_segment)
+        split_items: List[CollectedItem] = []
+
+        current_token_start = 0
+
+        for segment_text in segments:
+            boundary = None
+            if boundaries and len(boundaries) == len(segments):
+                boundary = boundaries[len(split_items)]
+
+            segment_token_count = (
+                len(self.token_encoder.encode(segment_text))
+                if self.token_encoder
+                else len(segment_text) // 4
+            )
+
+            if boundary:
+                segment_start, segment_end = boundary
+            else:
+                segment_start = current_token_start
+                segment_end = segment_start + segment_token_count
+
+            segment_metadata = self._build_segment_metadata(
+                base_metadata=original_item.metadata,
+                original_id=original_id,
+                segment_index=len(split_items),
+                segment_count=total_segments,
+                segment_token_start=segment_start,
+                segment_token_end=min(segment_end, token_count)
+            )
+
+            split_item = CollectedItem(
+                source_type=original_item.source_type,
+                source_name=original_item.source_name,
+                timestamp=original_item.timestamp,
+                text=segment_text,
+                metadata=segment_metadata
+            )
+            split_items.append(split_item)
+
+            next_start = segment_end - overlap_tokens
+            current_token_start = max(next_start, 0)
+
+        return split_items
+    
+    def _extract_original_identifier(self, item: CollectedItem) -> MetadataValue:
+        """
+        CollectedItem에서 원본 메시지를 식별할 수 있는 메타데이터를 추출합니다.
+        
+        Args:
+            item: 원본 CollectedItem 객체
+        
+        Returns:
+            원본 메시지 ID 또는 None
+        """
+        metadata = item.metadata or {}
+
+        candidate_keys = [
+            "message_id",
+            "original_message_id",
+            "id",
+            "document_id",
+            "article_id"
+        ]
+
+        for key in candidate_keys:
+            value = metadata.get(key)
+            if isinstance(value, (str, int)):
+                return value
+
+        return None
+
+    def _build_segment_metadata(
+        self,
+        base_metadata: Dict[str, MetadataValue],
+        original_id: Optional[MetadataValue],
+        segment_index: int,
+        segment_count: int,
+        segment_token_start: int,
+        segment_token_end: int
+    ) -> Dict[str, MetadataValue]:
+        """
+        세그먼트 메타데이터를 생성합니다.
+        
+        Args:
+            base_metadata: 원본 메타데이터
+            original_id: 원본 메시지 ID
+            segment_index: 세그먼트 인덱스 (0부터 시작)
+            segment_count: 전체 세그먼트 수
+            segment_token_start: 세그먼트 시작 토큰 위치
+            segment_token_end: 세그먼트 종료 토큰 위치
+        
+        Returns:
+            보강된 메타데이터 딕셔너리
+        """
+        segment_metadata = dict(base_metadata)
+
+        if original_id is not None:
+            segment_metadata["original_message_id"] = original_id
+
+        segment_metadata["segment_index"] = segment_index
+        segment_metadata["segment_count"] = segment_count
+        segment_metadata["segment_range_tokens"] = {
+            "start": segment_token_start,
+            "end": segment_token_end
+        }
+
+        return segment_metadata
     
     def _normalize_text(self, text: str) -> str:
         """
@@ -365,6 +561,71 @@ class Preprocessor:
                 return True
         
         return False
+
+    def _log_segmentation_config(self) -> None:
+        """
+        장문 메시지 분할 관련 설정 값을 상세히 로깅합니다.
+        """
+        logger.info(
+            "[Preprocessor] 장문 메시지 분할 설정 로드: "
+            f"split_long_messages={self.config.split_long_messages}, "
+            f"max_tokens_per_segment={self.config.max_tokens_per_segment}, "
+            f"segment_overlap_tokens={self.config.segment_overlap_tokens}"
+        )
+
+    def _validate_segmentation_config(self) -> None:
+        """
+        장문 메시지 분할 설정 값이 유효한지 검증합니다.
+        
+        Raises:
+            ValueError: 잘못된 설정 값이 발견된 경우
+        """
+        if not self.config.split_long_messages:
+            if self.config.segment_overlap_tokens < 0:
+                logger.warning(
+                    "[Preprocessor] segment_overlap_tokens가 0 미만입니다. 0으로 보정합니다. "
+                    f"현재 값={self.config.segment_overlap_tokens}"
+                )
+                self.config.segment_overlap_tokens = 0
+            return
+
+        if self.config.max_tokens_per_segment <= 0:
+            raise ValueError(
+                "[Preprocessor] max_tokens_per_segment는 1 이상의 정수여야 합니다. "
+                f"현재 값={self.config.max_tokens_per_segment}"
+            )
+
+        if self.config.segment_overlap_tokens < 0:
+            raise ValueError(
+                "[Preprocessor] segment_overlap_tokens는 0 이상의 정수여야 합니다. "
+                f"현재 값={self.config.segment_overlap_tokens}"
+            )
+
+        if self.config.segment_overlap_tokens >= self.config.max_tokens_per_segment:
+            logger.warning(
+                "[Preprocessor] segment_overlap_tokens가 max_tokens_per_segment 이상입니다. "
+                "자동으로 max_tokens_per_segment-1로 조정합니다. "
+                f"현재 segment_overlap_tokens={self.config.segment_overlap_tokens}, "
+                f"max_tokens_per_segment={self.config.max_tokens_per_segment}"
+            )
+            self.config.segment_overlap_tokens = max(self.config.max_tokens_per_segment - 1, 0)
+
+        if self.config.max_tokens_per_segment > self.config.max_tokens_per_item:
+            logger.warning(
+                "[Preprocessor] max_tokens_per_segment가 max_tokens_per_item을 초과합니다. "
+                "세그먼트 생성 시 토큰 제한이 예상과 다르게 동작할 수 있습니다. "
+                f"max_tokens_per_segment={self.config.max_tokens_per_segment}, "
+                f"max_tokens_per_item={self.config.max_tokens_per_item}"
+            )
+
+        if self.config.split_long_messages and not self.token_encoder:
+            logger.warning(
+                "[Preprocessor] split_long_messages가 활성화되었지만 토큰 인코더를 사용할 수 없습니다. "
+                "후속 단계에서 문자 기반 분할 로직이 필요합니다."
+            )
+
+        # 분할 경계 캐시 초기화
+        self._segment_boundaries: List[tuple[int, int]] = []
     
     def count_tokens(self, text: str) -> int:
         """
@@ -626,6 +887,215 @@ class Preprocessor:
             )
             # 파싱 실패 시 최소값 반환 (정렬 시 앞에 오도록)
             return datetime.min.replace(tzinfo=None)
+
+    def _split_text_to_segments(
+        self,
+        text: str,
+        max_tokens: Optional[int] = None
+    ) -> List[str]:
+        """
+        장문 텍스트를 토큰 기준으로 분할합니다.
+        
+        Args:
+            text: 분할할 원본 텍스트
+            max_tokens: 세그먼트당 최대 토큰 수 (None이면 설정값 사용)
+        
+        Returns:
+            토큰 기준으로 분할된 텍스트 세그먼트 리스트
+        
+        Raises:
+            ValueError: 잘못된 토큰 제한 값이 전달된 경우
+            RuntimeError: 토큰 인코더를 사용할 수 없는 경우
+        """
+        effective_max_tokens = max_tokens or self.config.max_tokens_per_segment
+        overlap_tokens = self._resolve_overlap_tokens(effective_max_tokens)
+
+        if effective_max_tokens <= 0:
+            raise ValueError(
+                "[Preprocessor] 세그먼트당 최대 토큰 수는 1 이상의 정수여야 합니다. "
+                f"effective_max_tokens={effective_max_tokens}"
+            )
+
+        if not text:
+            logger.info("[Preprocessor] 빈 텍스트 입력: 세그먼트가 생성되지 않습니다.")
+            self._segment_boundaries = []
+            return []
+
+        if self.token_encoder:
+            return self._split_with_token_encoder(
+                text=text,
+                max_tokens=effective_max_tokens,
+                overlap_tokens=overlap_tokens
+            )
+
+        logger.warning(
+            "[Preprocessor] 토큰 인코더를 사용할 수 없어 문자 기반 분할을 수행합니다."
+        )
+
+        return self._split_without_token_encoder(
+            text=text,
+            max_tokens=effective_max_tokens,
+            overlap_tokens=overlap_tokens
+        )
+
+    def _resolve_overlap_tokens(self, max_tokens: int) -> int:
+        """
+        장문 분할 시 사용할 오버랩 토큰 수를 계산합니다.
+        
+        Args:
+            max_tokens: 세그먼트당 최대 토큰 수
+        
+        Returns:
+            유효한 오버랩 토큰 수
+        """
+        if max_tokens <= 1:
+            return 0
+
+        desired_overlap = self.config.segment_overlap_tokens
+        overlap = max(0, min(desired_overlap, max_tokens - 1))
+
+        if overlap < desired_overlap:
+            logger.warning(
+                "[Preprocessor] segment_overlap_tokens 조정: "
+                f"요청된 값={desired_overlap}, 적용 값={overlap}, "
+                f"max_tokens={max_tokens}"
+            )
+
+        return overlap
+
+    def _split_with_token_encoder(
+        self,
+        text: str,
+        max_tokens: int,
+        overlap_tokens: int
+    ) -> List[str]:
+        """
+        토큰 인코더를 사용하여 텍스트를 분할합니다.
+        
+        Args:
+            text: 분할할 텍스트
+            max_tokens: 세그먼트당 최대 토큰 수
+            overlap_tokens: 세그먼트 간 토큰 오버랩 크기
+        
+        Returns:
+            토큰 기반 세그먼트 리스트
+        """
+        tokens = self.token_encoder.encode(text)
+        total_tokens = len(tokens)
+        boundaries: List[tuple[int, int]] = []
+
+        if total_tokens <= max_tokens:
+            logger.info(
+                "[Preprocessor] 텍스트 토큰 수가 제한 이하입니다. 단일 세그먼트 반환. "
+                f"total_tokens={total_tokens}, max_tokens={max_tokens}"
+            )
+            self._segment_boundaries = [(0, total_tokens)]
+            return [text]
+
+        segments: List[str] = []
+        start_index = 0
+        segment_index = 0
+
+        while start_index < total_tokens:
+            end_index = min(start_index + max_tokens, total_tokens)
+            segment_tokens = tokens[start_index:end_index]
+            segment_text = self.token_encoder.decode(segment_tokens)
+
+            segments.append(segment_text)
+            boundaries.append((start_index, end_index))
+
+            logger.debug(
+                "[Preprocessor] 토큰 세그먼트 생성: "
+                f"index={segment_index}, start_token={start_index}, end_token={end_index}, "
+                f"segment_token_count={len(segment_tokens)}, overlap_tokens={overlap_tokens}"
+            )
+
+            if end_index >= total_tokens:
+                break
+
+            start_index = max(0, end_index - overlap_tokens)
+            segment_index += 1
+
+        logger.info(
+            "[Preprocessor] 토큰 기반 텍스트 분할 완료: "
+            f"total_tokens={total_tokens}, max_tokens={max_tokens}, "
+            f"overlap_tokens={overlap_tokens}, segment_count={len(segments)}"
+        )
+
+        self._segment_boundaries = boundaries
+        return segments
+
+    def _split_without_token_encoder(
+        self,
+        text: str,
+        max_tokens: int,
+        overlap_tokens: int
+    ) -> List[str]:
+        """
+        토큰 인코더를 사용할 수 없는 경우 문자 기반으로 텍스트를 분할합니다.
+        
+        Args:
+            text: 분할할 텍스트
+            max_tokens: 세그먼트당 최대 토큰 수(문자 수 추정에 사용)
+            overlap_tokens: 세그먼트 간 토큰 오버랩 크기(문자 수 추정에 사용)
+        
+        Returns:
+            문자 기반 세그먼트 리스트
+        """
+        estimated_chars_per_token = 4
+        max_chars = max_tokens * estimated_chars_per_token
+        overlap_chars = overlap_tokens * estimated_chars_per_token
+        total_chars = len(text)
+        boundaries: List[tuple[int, int]] = []
+
+        if max_chars <= 0:
+            raise ValueError(
+                "[Preprocessor] 문자 기반 분할에 사용할 최대 문자 수가 1 이상이어야 합니다. "
+                f"max_chars={max_chars}"
+            )
+
+        if total_chars <= max_chars:
+            logger.info(
+                "[Preprocessor] 텍스트 길이가 제한 이하입니다. 단일 세그먼트 반환. "
+                f"total_chars={total_chars}, max_chars={max_chars}"
+            )
+            estimated_tokens = total_chars // estimated_chars_per_token
+            self._segment_boundaries = [(0, estimated_tokens)]
+            return [text]
+
+        segments: List[str] = []
+        start_index = 0
+        segment_index = 0
+
+        while start_index < total_chars:
+            end_index = min(start_index + max_chars, total_chars)
+            segment_text = text[start_index:end_index]
+
+            segments.append(segment_text)
+            estimated_start = start_index // estimated_chars_per_token
+            estimated_end = end_index // estimated_chars_per_token
+            boundaries.append((estimated_start, estimated_end))
+
+            logger.debug(
+                "[Preprocessor] 문자 세그먼트 생성: "
+                f"index={segment_index}, start_char={start_index}, end_char={end_index}, "
+                f"segment_char_count={len(segment_text)}, overlap_chars={overlap_chars}"
+            )
+
+            if end_index >= total_chars:
+                break
+
+            start_index = max(0, end_index - overlap_chars)
+            segment_index += 1
+
+        logger.info(
+            "[Preprocessor] 문자 기반 텍스트 분할 완료: "
+            f"total_chars={total_chars}, max_chars={max_chars}, "
+            f"overlap_chars={overlap_chars}, segment_count={len(segments)}"
+        )
+
+        self._segment_boundaries = boundaries
+        return segments
 
 
 # 모듈 레벨 함수: Preprocessor 인스턴스를 사용하여 청크 생성

@@ -11,6 +11,8 @@ import re
 import logging
 from typing import Dict, List, Mapping, Sequence, Tuple, Optional, Any
 
+logger = logging.getLogger(__name__)
+
 
 def parse_json_from_llm_response(response_text: str, context: str = "LLM 응답") -> Dict[str, object]:
     """

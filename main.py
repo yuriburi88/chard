@@ -18,7 +18,7 @@ from src.async_utils import run_async_main
 from src.collectors.rss_collector import RSSCollector
 from src.collectors.telegram_collector import TelegramCollector
 from src.collectors.models import Article, TelegramMessage, CollectedItem
-from src.preprocessor import Preprocessor
+from src.preprocessor import Preprocessor, PreprocessingConfig
 from src.normalizer import DataNormalizer
 from src.storage import StorageManager, ExecutionLogger
 from src.workflows.state import AnalysisState
@@ -357,7 +357,8 @@ async def collect_telegram_data(
 async def preprocess_data(
     rss_articles: List[Article],
     telegram_messages: List[TelegramMessage],
-    execution_logger: ExecutionLogger
+    execution_logger: ExecutionLogger,
+    preprocessing_config: Optional[PreprocessingConfig] = None
 ) -> tuple[List[Article], List[CollectedItem]]:
     """
     데이터를 전처리합니다.
@@ -366,6 +367,7 @@ async def preprocess_data(
         rss_articles: RSS 기사 리스트
         telegram_messages: 텔레그램 메시지 리스트
         execution_logger: 실행 로그 기록기
+        preprocessing_config: 전처리 설정
     
     Returns:
         (전처리된 RSS 기사 리스트, 전처리된 텔레그램 CollectedItem 리스트)
@@ -381,7 +383,7 @@ async def preprocess_data(
     logger.info("[전처리] 데이터 전처리 시작")
     preprocess_start = datetime.now(timezone.utc)
     
-    preprocessor = Preprocessor()
+    preprocessor = Preprocessor(config=preprocessing_config)
     
     # RSS 기사 전처리
     if rss_articles:
@@ -752,10 +754,17 @@ async def main_async(app_config: AppConfig, log_level: str = "INFO") -> None:
         })
         
         # 2. 데이터 전처리
+        preprocessing_config = PreprocessingConfig(
+            split_long_messages=app_config.split_long_messages,
+            max_tokens_per_segment=app_config.max_tokens_per_segment,
+            segment_overlap_tokens=app_config.segment_overlap_tokens
+        )
+        
         preprocessed_articles, preprocessed_items = await preprocess_data(
             rss_articles,
             telegram_messages,
-            execution_logger
+            execution_logger,
+            preprocessing_config=preprocessing_config
         )
         
         # 3. 데이터 정규화

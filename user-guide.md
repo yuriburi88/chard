@@ -33,7 +33,7 @@
 프로그램이 있는 폴더로 이동합니다:
 
 ```cmd
-cd d:\devrsc\GPT\exercise\rex
+cd myDrive:\dev\chard
 ```
 
 (실제 프로젝트 폴더 경로로 변경하세요)
@@ -68,7 +68,7 @@ venv\Scripts\activate
 
 프로젝트 폴더에 `.env` 파일을 생성합니다:
 
-1. 프로젝트 폴더(`rex`)에서 메모장이나 텍스트 편집기를 엽니다
+1. 프로젝트 폴더(`chard`)에서 메모장이나 텍스트 편집기를 엽니다
 2. 다음 내용을 입력합니다:
    ```
    GEMINI_API_KEY=여기에_발급받은_API_키_붙여넣기
@@ -113,33 +113,7 @@ OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 
 텔레그램 채널에서 데이터를 수집하려면 텔레그램 설정이 필요합니다. 텔레그램을 사용하지 않으면 이 단계를 건너뛰어도 됩니다.
 
-### 방법 1: Bot API 사용 (간단한 방법)
-
-공개 채널의 메시지를 수집할 때 사용합니다.
-
-#### 1단계: 텔레그램 봇 생성
-
-1. 텔레그램 앱에서 [@BotFather](https://t.me/BotFather)를 검색합니다
-2. `/newbot` 명령을 입력합니다
-3. 봇 이름을 입력합니다 (예: "My News Bot")
-4. 봇 사용자 이름을 입력합니다 (예: "my_news_bot")
-5. BotFather가 제공하는 토큰을 복사합니다 (예: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
-
-#### 2단계: config.yml 파일 수정
-
-`config.yml` 파일을 열고 `telegram_sources` 섹션을 다음과 같이 수정합니다:
-
-```yaml
-telegram_sources:
-  - name: 내_채널_이름
-    channel_id: '@채널_사용자_이름'  # 예: '@cryptonews'
-    auth_method: bot_api
-    bot_token: 여기에_봇_토큰_붙여넣기  # BotFather에서 받은 토큰
-    timezone: 9
-    max_messages: 100
-```
-
-### 방법 2: MTProto 사용 (고급 방법)
+### 방법 : MTProto 사용
 
 비공개 채널이나 그룹의 메시지를 수집할 때 사용합니다.
 
@@ -157,7 +131,7 @@ telegram_sources:
 
 #### 2단계: 세션 파일 생성
 
-프로젝트 폴더에서 다음 명령을 실행합니다:
+프로젝트 폴더에서 다음 명령을 실행합니다(텔레그램 접속 프로필(credential, session 정보) 만들기):
 
 ```cmd
 python tele_setup.py --config config.yml --profile "내_프로필_이름"
@@ -184,6 +158,30 @@ telegram_sources:
     tg_cred_id: main  # 위에서 입력한 자격증명 ID
     session_file: secrets\telegram_sessions\tg_cred_main.session
 ```
+
+### 전처리 옵션 (장문 메시지 분할)
+
+텔레그램에서 수집한 장문 메시지가 LLM 입력 제한을 초과하는 경우 자동으로 세그먼트로 분할할 수 있습니다. `config.yml`의 `preprocessing` 섹션을 다음과 같이 설정하세요:
+
+```yaml
+preprocessing:
+  split_long_messages: true                # 장문 분할 기능 활성화 여부 (기본: true)
+  max_tokens_per_segment: 4000             # 세그먼트당 최대 토큰 수
+  segment_overlap_tokens: 200              # 세그먼트 간 컨텍스트 오버랩 토큰 수
+```
+
+- **split_long_messages**: `true`로 설정하면 토큰 제한을 초과한 메시지를 여러 조각으로 나누어 Stage 4 분석에 전달합니다.
+- **max_tokens_per_segment**: 분할된 각 세그먼트의 최대 토큰 수입니다. 사용 중인 LLM 컨텍스트 길이에 맞춰 조정하세요.
+- **segment_overlap_tokens**: 세그먼트 간 문맥 손실을 줄이기 위해 겹쳐서 포함할 토큰 수입니다. 0으로 설정하면 오버랩 없이 분할합니다.
+
+분할된 세그먼트에는 다음 메타데이터가 자동으로 추가됩니다.
+
+- `original_message_id` / `message_id`: 원본 텔레그램 메시지 ID
+- `segment_index`: 현재 세그먼트의 순번 (0부터 시작)
+- `segment_count`: 전체 세그먼트 개수
+- `segment_range_tokens.start`, `segment_range_tokens.end`: 원본 메시지에서 차지하는 토큰 범위
+
+이 정보를 사용하면 Stage 4 이후 단계에서 각 세그먼트가 어떤 원본 메시지에 속했는지 추적하고, 필요 시 원문을 재조합할 수 있습니다.
 
 ---
 

@@ -37,7 +37,7 @@ class TestModelNameNormalization:
         "flash" 별칭이 올바르게 정규화되는지 확인합니다.
         """
         normalized = GeminiClient._normalize_model_name("flash")
-        assert normalized == "gemini-2.0-flash-exp"
+        assert normalized == "gemini-2.5-flash"
 
     @staticmethod
     def test_normalize_pro_alias() -> None:
@@ -45,23 +45,23 @@ class TestModelNameNormalization:
         "pro" 별칭이 올바르게 정규화되는지 확인합니다.
         """
         normalized = GeminiClient._normalize_model_name("pro")
-        assert normalized == "gemini-2.0-pro-exp"
+        assert normalized == "gemini-2.5-pro"
 
     @staticmethod
     def test_normalize_flash_without_exp() -> None:
         """
-        "gemini-2.0-flash" 형태가 "gemini-2.0-flash-exp"로 정규화되는지 확인합니다.
+        "gemini-2.0-flash" 형태가 stable 버전으로 유지되는지 확인합니다.
         """
         normalized = GeminiClient._normalize_model_name("gemini-2.0-flash")
-        assert normalized == "gemini-2.0-flash-exp"
+        assert normalized == "gemini-2.0-flash"
 
     @staticmethod
     def test_normalize_pro_without_exp() -> None:
         """
-        "gemini-2.0-pro" 형태가 "gemini-2.0-pro-exp"로 정규화되는지 확인합니다.
+        "gemini-2.0-pro" 형태가 stable 버전으로 유지되는지 확인합니다.
         """
         normalized = GeminiClient._normalize_model_name("gemini-2.0-pro")
-        assert normalized == "gemini-2.0-pro-exp"
+        assert normalized == "gemini-2.0-pro"
 
     @staticmethod
     def test_preserves_already_normalized() -> None:
@@ -119,7 +119,7 @@ class TestGeminiClientInitialization:
         기본 모델로 초기화되는지 확인합니다.
         """
         client = GeminiClient()
-        assert client.model == "gemini-2.0-flash-exp"
+        assert client.model == "gemini-2.5-flash"
         assert client.model_type == "flash"
         mock_chat.assert_called_once()
 
@@ -132,7 +132,7 @@ class TestGeminiClientInitialization:
         Pro 모델로 초기화되는지 확인합니다.
         """
         client = GeminiClient(model="pro")
-        assert client.model == "gemini-2.0-pro-exp"
+        assert client.model == "gemini-2.5-pro"
         assert client.model_type == "pro"
         mock_chat.assert_called_once()
 

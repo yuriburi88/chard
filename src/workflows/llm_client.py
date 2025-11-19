@@ -11,11 +11,12 @@ Pro 전환을 고려한 설정 옵션화:
 """
 
 import os
+import sys
 import logging
 import asyncio
 import re
 from typing import Dict, Any, Optional, Literal
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Gemini 모델 상수 정의 (2025년 11월 기준)
 # 참조: https://ai.google.dev/gemini-api/docs/models
+# Note: "-exp" postfix는 더 이상 사용되지 않으며, stable 버전을 사용합니다.
 GEMINI_FLASH_MODELS = {
     "gemini-2.5-flash",
     "gemini-2.0-flash",
@@ -48,6 +50,32 @@ GEMINI_PRO_MODELS = {
 
 # 지원되는 모든 Gemini 모델
 SUPPORTED_GEMINI_MODELS = GEMINI_FLASH_MODELS | GEMINI_PRO_MODELS
+GEMINI_FLASH_MODELS_LOWER = {model.lower() for model in GEMINI_FLASH_MODELS}
+GEMINI_PRO_MODELS_LOWER = {model.lower() for model in GEMINI_PRO_MODELS}
+SUPPORTED_GEMINI_MODEL_MAP: Dict[str, str] = {
+    model.lower(): model for model in SUPPORTED_GEMINI_MODELS
+}
+
+
+def _get_module_attribute(attribute_name: str) -> Any:
+    """
+    모듈 별칭(`src.workflows.llm_client`)에 패치된 속성이 있는지 확인한 후 값을 반환합니다.
+    
+    테스트 환경에서는 `llm_client_module`로 로드된 모듈과 `src.workflows.llm_client` 별칭에
+    서로 다른 인스턴스가 존재할 수 있으므로, 별칭 모듈에 동일한 속성이 존재하면 우선 사용합니다.
+    
+    Args:
+        attribute_name: 조회할 속성 이름
+    
+    Returns:
+        속성 값
+    """
+    alias_module = sys.modules.get("src.workflows.llm_client")
+
+    if alias_module is not None and hasattr(alias_module, attribute_name):
+        return getattr(alias_module, attribute_name)
+
+    return globals()[attribute_name]
 
 
 class GeminiClient:
@@ -76,9 +104,9 @@ class GeminiClient:
         Args:
             api_key: Google API 키 (None이면 환경변수에서 로드)
             model: 모델명 (기본값: gemini-2.5-flash)
-                - Flash 모델: gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-flash 등
-                - Pro 모델: gemini-2.5-pro, gemini-2.0-pro, gemini-1.5-pro 등
-                - config.yml에서 "flash" 또는 "pro" 별칭 사용 가능
+                - Flash 모델: gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-flash 등 (stable 버전)
+                - Pro 모델: gemini-2.5-pro, gemini-2.0-pro, gemini-1.5-pro 등 (stable 버전)
+                - config.yml에서 "flash" 또는 "pro" 별칭 사용 가능 (최신 stable 버전으로 매핑)
                 - 참조: https://ai.google.dev/gemini-api/docs/models
             temperature: 온도 설정 (기본값: 0.1)
             max_tokens: 최대 출력 토큰 수 (기본값: 4000)
@@ -87,7 +115,9 @@ class GeminiClient:
             ImportError: langchain-google-genai 패키지가 설치되지 않은 경우
             ValueError: API 키가 없거나 모델명이 유효하지 않은 경우
         """
-        if not LANGCHAIN_AVAILABLE:
+        langchain_available = bool(_get_module_attribute("LANGCHAIN_AVAILABLE"))
+
+        if not langchain_available:
             raise ImportError(
                 "langchain-google-genai 패키지가 설치되어 있지 않습니다. "
                 "pip install langchain-google-genai를 실행하세요."
@@ -110,6 +140,7 @@ class GeminiClient:
         # 참조: https://docs.langchain.com/oss/python/integrations/chat/google_generative_ai
         # LangChain 문서에 따르면 HarmCategory와 HarmBlockThreshold는 langchain_google_genai에서 직접 import
         safety_settings = None
+        chat_model_cls = _get_module_attribute("ChatGoogleGenerativeAI")
         try:
             # LangChain 공식 문서 방식: langchain_google_genai에서 직접 import
             # 참조: https://docs.langchain.com/oss/python/integrations/llms/google_ai
@@ -193,7 +224,7 @@ class GeminiClient:
                 "[GeminiClient] 안전 설정 적용: 모든 카테고리 BLOCK_NONE"
             )
         
-        self._llm = ChatGoogleGenerativeAI(**init_kwargs)
+        self._llm = chat_model_cls(**init_kwargs)
         
         # thinking_budget 설정 확인 (디버깅용)
         actual_thinking_budget = getattr(self._llm, 'thinking_budget', None)
@@ -754,15 +785,46 @@ class GeminiClient:
             await self._handle_api_error(e, prompt_length)
 
     @staticmethod
+    def _detect_model_type(model: str) -> Literal["flash", "pro"]:
+        """
+        모델명에서 모델 타입(Flash/Pro)을 감지합니다.
+        
+        Args:
+            model: 정규화된 모델명
+        
+        Returns:
+            "flash" 또는 "pro"
+        """
+        model_lower = model.lower()
+
+        if model_lower in GEMINI_FLASH_MODELS_LOWER:
+            return "flash"
+
+        if model_lower in GEMINI_PRO_MODELS_LOWER:
+            return "pro"
+
+        if re.match(r"^gemini-\d+\.\d+-flash", model_lower):
+            return "flash"
+
+        if re.match(r"^gemini-\d+\.\d+-pro", model_lower):
+            return "pro"
+
+        logger.warning(
+            "[GeminiClient] 모델 타입을 감지할 수 없어 'flash'로 가정합니다: %s",
+            model,
+        )
+        return "flash"
+
+    @staticmethod
     def _normalize_model_name(model: str) -> str:
         """
         모델명을 정규화하고 검증합니다.
         
         Pro 전환을 고려하여 다음과 같은 변환을 지원합니다:
-        - "flash" → "gemini-2.5-flash" (최신 Flash 모델)
-        - "pro" → "gemini-2.5-pro" (최신 Pro 모델)
-        - "gemini-2.0-flash" → "gemini-2.0-flash" (그대로 유지, stable 버전)
-        - "gemini-2.0-pro" → "gemini-2.0-pro" (그대로 유지, stable 버전)
+        - "flash" → "gemini-2.5-flash" (기본 Flash 모델, 최신 stable 버전)
+        - "pro" → "gemini-2.5-pro" (기본 Pro 모델, 최신 stable 버전)
+        - "gemini-X.Y-flash" → "gemini-X.Y-flash" (stable 버전 유지)
+        - "gemini-X.Y-pro" → "gemini-X.Y-pro" (stable 버전 유지)
         
         Args:
             model: 원본 모델명
@@ -775,81 +837,42 @@ class GeminiClient:
         """
         model_lower = model.lower().strip()
         
-        # 간단한 별칭 처리 (최신 stable 모델 사용)
-        if model_lower == "flash":
-            return "gemini-2.5-flash"
-        if model_lower == "pro":
-            return "gemini-2.5-pro"
-        
-        # 이미 정규화된 모델명인 경우 그대로 반환
-        if model in SUPPORTED_GEMINI_MODELS:
-            return model
-        
-        # "gemini-X.Y-flash" 형태는 그대로 유지 (stable 버전)
-        flash_match = re.match(r"^gemini-(\d+\.\d+)-flash", model_lower)
-        if flash_match:
-            # 이미 지원되는 모델이면 그대로 반환
-            if model in SUPPORTED_GEMINI_MODELS:
-                return model
-            # 버전만 맞으면 stable 버전으로 정규화 시도
-            version = flash_match.group(1)
-            stable_version = f"gemini-{version}-flash"
-            if stable_version in SUPPORTED_GEMINI_MODELS:
+        alias_map: Dict[str, str] = {
+            "flash": "gemini-2.5-flash",
+            "pro": "gemini-2.5-pro",
+        }
+
+        if model_lower in alias_map:
+            normalized = alias_map[model_lower]
+
+            logger.info(
+                "[GeminiClient] 모델명 별칭 정규화: %s → %s",
+                model,
+                normalized,
+            )
+            return normalized
+
+        core_match = re.fullmatch(r"^gemini-(\d+\.\d+)-(flash|pro)$", model_lower)
+        if core_match:
+            version = core_match.group(1)
+            variant = core_match.group(2)
+
+            # stable 버전을 우선 사용 (-exp postfix 제거)
+            stable_model = f"gemini-{version}-{variant}"
+            if stable_model in SUPPORTED_GEMINI_MODELS:
                 logger.info(
                     "[GeminiClient] 모델명 정규화: %s → %s",
                     model,
-                    stable_version,
+                    stable_model,
                 )
-                return stable_version
-        
-        # "gemini-X.Y-pro" 형태는 그대로 유지 (stable 버전)
-        pro_match = re.match(r"^gemini-(\d+\.\d+)-pro", model_lower)
-        if pro_match:
-            # 이미 지원되는 모델이면 그대로 반환
-            if model in SUPPORTED_GEMINI_MODELS:
-                return model
-            # 버전만 맞으면 stable 버전으로 정규화 시도
-            version = pro_match.group(1)
-            stable_version = f"gemini-{version}-pro"
-            if stable_version in SUPPORTED_GEMINI_MODELS:
-                logger.info(
-                    "[GeminiClient] 모델명 정규화: %s → %s",
-                    model,
-                    stable_version,
-                )
-                return stable_version
-        
-        # 이미 정규화된 모델명인 경우 그대로 반환
-        if model in SUPPORTED_GEMINI_MODELS:
-            return model
-        
-        # 지원되지 않는 모델명인 경우
+                return stable_model
+
+        exact_match = SUPPORTED_GEMINI_MODEL_MAP.get(model_lower)
+        if exact_match:
+            return exact_match
+
         raise ValueError(
             f"지원되지 않는 Gemini 모델명입니다: {model}\n"
             f"지원되는 모델: {', '.join(sorted(SUPPORTED_GEMINI_MODELS))}\n"
             f"또는 'flash' 또는 'pro'를 사용하여 기본 모델을 선택할 수 있습니다."
         )
-
-    @staticmethod
-    def _detect_model_type(model: str) -> Literal["flash", "pro"]:
-        """
-        모델명에서 모델 타입(Flash/Pro)을 감지합니다.
-        
-        Args:
-            model: 정규화된 모델명
-        
-        Returns:
-            "flash" 또는 "pro"
-        """
-        if model in GEMINI_FLASH_MODELS:
-            return "flash"
-        if model in GEMINI_PRO_MODELS:
-            return "pro"
-        
-        # 기본값 (일반적으로 발생하지 않음)
-        logger.warning(
-            "[GeminiClient] 모델 타입을 감지할 수 없어 'flash'로 가정합니다: %s",
-            model,
-        )
-        return "flash"
-

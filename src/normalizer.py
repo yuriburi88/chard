@@ -186,23 +186,23 @@ class DataNormalizer:
         Returns:
             딕셔너리 형태의 정규화된 데이터
         """
-        meta: Dict[str, Any] = {}
+        meta: Dict[str, Any] = {
+            key: value
+            for key, value in item.metadata.items()
+            if value is not None
+        }
         
-        # 메타데이터에서 필요한 정보 추출
-        if "title" in item.metadata:
-            meta["title"] = item.metadata["title"]
-        
-        if "url" in item.metadata:
-            meta["url"] = item.metadata["url"]
-        
-        # author는 프로젝트 목적에 불필요하므로 제외
-        
-        # 텔레그램의 경우 채널 정보 추가
+        # 텔레그램의 경우 채널 정보 필드를 channel로 통합 (None 값은 제외)
         if item.source_type == "telegram":
-            if "channel_name" in item.metadata:
-                meta["channel"] = item.metadata["channel_name"]
-            elif "channel_id" in item.metadata:
-                meta["channel"] = item.metadata["channel_id"]
+            if "channel" not in meta:
+                if "channel_name" in item.metadata:
+                    channel_name_value = item.metadata["channel_name"]
+                    if channel_name_value is not None:
+                        meta["channel"] = channel_name_value
+                elif "channel_id" in item.metadata:
+                    channel_id_value = item.metadata["channel_id"]
+                    if channel_id_value is not None:
+                        meta["channel"] = channel_id_value
         
         return {
             "source": item.source_type,
