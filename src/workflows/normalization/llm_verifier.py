@@ -264,6 +264,7 @@ def _collect_unprocessed_candidates(
 def _normalize_variants(raw_variants: object) -> List[str]:
     """
     변형 용어 목록을 중복 제거하며 정규화합니다.
+    딕셔너리나 복잡한 객체는 제외합니다.
     """
     if not isinstance(raw_variants, Iterable):
         return []
@@ -271,9 +272,14 @@ def _normalize_variants(raw_variants: object) -> List[str]:
     normalized: List[str] = []
 
     for variant in raw_variants:
+        # 딕셔너리, 리스트, 튜플 등 복잡한 객체는 건너뛰기
+        if isinstance(variant, (dict, list, tuple)):
+            continue
+
         term = str(variant).strip()
 
-        if term and term not in normalized:
+        # str(dict) 형태로 변환된 것도 필터링 ('{' 또는 '[' 로 시작)
+        if term and term not in normalized and not term.startswith(('{', '[')):
             normalized.append(term)
 
     return normalized
@@ -286,6 +292,8 @@ def _collect_original_variants(
 ) -> List[str]:
     """
     대표 용어와 변형 정보를 결합하여 original_variants를 구성합니다.
+
+    문자열만 포함하도록 필터링하여 딕셔너리/복잡한 객체를 제외합니다.
     """
     ordered_terms: List[str] = []
 
@@ -296,6 +304,18 @@ def _collect_original_variants(
             if value and value not in ordered_terms:
                 ordered_terms.append(value)
 
+    def _is_valid_string(value: object) -> bool:
+        """
+        유효한 문자열인지 확인합니다.
+        딕셔너리, 리스트 등 복잡한 객체를 걸러냅니다.
+        """
+        if not isinstance(value, str):
+            return False
+        # str(dict)는 '{'로 시작하므로 이를 필터링
+        if value.strip().startswith('{') or value.strip().startswith('['):
+            return False
+        return True
+
     _append_distinct([canonical])
     _append_distinct(variants)
 
@@ -305,7 +325,16 @@ def _collect_original_variants(
 
         original_variants = candidate.get("original_variants", [])
         if isinstance(original_variants, Iterable):
-            _append_distinct(str(value) for value in original_variants)
+            # 문자열만 필터링하여 추가
+            valid_variants = []
+            for value in original_variants:
+                # 딕셔너리나 복잡한 객체는 건너뛰기
+                if isinstance(value, (dict, list, tuple)):
+                    continue
+                # 문자열만 추가
+                if isinstance(value, str) and not value.strip().startswith(('{', '[')):
+                    valid_variants.append(value)
+            _append_distinct(valid_variants)
 
     return ordered_terms
 

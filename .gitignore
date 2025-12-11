@@ -61,3 +61,13 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Claude Code
+.claude/
+
+# Cache files
+dynamic_keywords_cache.json
+nul
+
+# Reference files
+ref.env
+search_kaia.py

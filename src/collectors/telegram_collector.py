@@ -501,12 +501,21 @@ class MTProtoCollector(BaseTelegramCollector):
                         continue
                     message_ids.add(msg.id)
                     
-                    # 텍스트 추출
+                    # 텍스트 추출 (메시지 본문, raw_text, 미디어 캡션 순으로 시도)
                     text = msg.message or ""
                     if not text and msg.entities:
                         # 엔티티가 있는 경우 텍스트 재구성
                         text = msg.raw_text or ""
-                    
+                    if not text and hasattr(msg, 'media') and msg.media:
+                        # 미디어 메시지의 경우 캡션 확인
+                        if hasattr(msg.media, 'caption') and msg.media.caption:
+                            text = msg.media.caption
+
+                    # 텍스트가 없는 메시지(순수 사진/동영상/스티커 등)는 스킵
+                    if not text or not text.strip():
+                        logger.debug(f"[MTProto] 텍스트 없는 메시지 스킵: ID={msg.id}")
+                        continue
+
                     # TelegramMessage 객체 생성
                     telegram_msg = TelegramMessage(
                         message_id=msg.id,

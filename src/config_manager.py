@@ -79,10 +79,21 @@ class NormalizationConfig:
 
 
 @dataclass
+class NarrativeConfig:
+    """내러티브 세분화 설정"""
+    enable_segmentation: bool = True  # 내러티브 세분화 활성화
+    macro_paragraphs: int = 2  # Macro 내러티브 문단 수
+    crypto_native_paragraphs: int = 2  # Crypto Native 내러티브 문단 수
+    crypto_macro_paragraphs: int = 2  # Crypto-Macro 내러티브 문단 수
+    integrated_paragraphs: int = 3  # 통합 내러티브 문단 수
+    min_category_confidence: float = 0.5  # 카테고리 분류 최소 신뢰도
+
+
+@dataclass
 class OutputConfig:
     """출력 구성"""
     top_keywords_count: int = 10  # 최종 상위 키워드 개수
-    summary_paragraphs: int = 4  # 내러티브 요약 문단 수
+    summary_paragraphs: int = 4  # 내러티브 요약 문단 수 (세분화 비활성화 시 사용)
     log_level: str = "INFO"
     log_filename_strategy: Literal["timestamp", "fixed_window"] = "timestamp"
     log_fixed_window_days: int = 10
@@ -92,10 +103,22 @@ class OutputConfig:
 
 @dataclass
 class CollectionPeriodConfig:
-    """수집 기간 설정"""
-    start_time: Optional[str] = None  # ISO 8601 형식 또는 None
-    end_time: Optional[str] = None  # ISO 8601 형식 또는 None
-    recent_hours: Optional[int] = None  # 최근 N시간 (start_time/end_time이 없을 때 사용)
+    """수집 기간 설정
+
+    두 가지 모드 지원:
+    - "recent_hours": 현재 시간에서 N시간 전까지 (기존 방식)
+    - "days_back": N일 전 00:00부터 현재까지 (날짜 기준)
+
+    예시 (현재 11/24 16:44인 경우):
+    - mode="recent_hours", recent_hours=24 → 11/23 16:44 ~ 현재
+    - mode="days_back", days_back=1 → 11/23 00:00 ~ 현재
+    - mode="days_back", days_back=3 → 11/21 00:00 ~ 현재
+    """
+    mode: str = "recent_hours"  # "recent_hours" 또는 "days_back"
+    start_time: Optional[str] = None  # ISO 8601 형식 또는 None (직접 지정 시)
+    end_time: Optional[str] = None  # ISO 8601 형식 또는 None (직접 지정 시)
+    recent_hours: Optional[int] = None  # mode="recent_hours"일 때: 최근 N시간
+    days_back: Optional[int] = None  # mode="days_back"일 때: N일 전 00:00부터
 
 
 @dataclass
@@ -103,23 +126,26 @@ class AppConfig:
     """애플리케이션 전체 설정"""
     # 환경 변수
     gemini_api_key: str
-    
+
     # 수집 기간
     collection_period: CollectionPeriodConfig
-    
+
     # 데이터 소스
     rss_sources: List[RSSSourceConfig] = field(default_factory=list)
     telegram_sources: List[TelegramSourceConfig] = field(default_factory=list)
-    
+
     # LLM 설정
     llm: LLMConfig = field(default_factory=LLMConfig)
-    
+
     # 키워드 정규화 설정
     normalization: NormalizationConfig = field(default_factory=NormalizationConfig)
-    
+
+    # 내러티브 설정
+    narrative: NarrativeConfig = field(default_factory=NarrativeConfig)
+
     # 출력 설정
     output: OutputConfig = field(default_factory=OutputConfig)
-    
+
     # 전처리 설정
     split_long_messages: bool = True
     max_tokens_per_segment: int = 4000
@@ -405,7 +431,18 @@ class ConfigManager:
             embedding_provider=norm_config.get("embedding_provider", "google"),
             embedding_model=norm_config.get("embedding_model")
         )
-        
+
+        # 내러티브 설정 파싱
+        narrative_config = config.get("narrative", {})
+        narrative = NarrativeConfig(
+            enable_segmentation=narrative_config.get("enable_segmentation", True),
+            macro_paragraphs=narrative_config.get("macro_paragraphs", 2),
+            crypto_native_paragraphs=narrative_config.get("crypto_native_paragraphs", 2),
+            crypto_macro_paragraphs=narrative_config.get("crypto_macro_paragraphs", 2),
+            integrated_paragraphs=narrative_config.get("integrated_paragraphs", 3),
+            min_category_confidence=narrative_config.get("min_category_confidence", 0.5)
+        )
+
         # 출력 설정 파싱
         output_config = config.get("output", {})
         output = OutputConfig(
@@ -417,13 +454,13 @@ class ConfigManager:
             display_timezone=output_config.get("display_timezone", 9),
             output_dir=output_config.get("output_dir", "output")
         )
-        
+
         # 전처리 설정 파싱
         preprocessing_config = config.get("preprocessing", {})
         split_long_messages = preprocessing_config.get("split_long_messages", True)
         max_tokens_per_segment = preprocessing_config.get("max_tokens_per_segment", 4000)
         segment_overlap_tokens = preprocessing_config.get("segment_overlap_tokens", 200)
-        
+
         return AppConfig(
             gemini_api_key=env_vars["GEMINI_API_KEY"],
             collection_period=collection_period,
@@ -431,6 +468,7 @@ class ConfigManager:
             telegram_sources=telegram_sources,
             llm=llm,
             normalization=normalization,
+            narrative=narrative,
             output=output,
             split_long_messages=split_long_messages,
             max_tokens_per_segment=max_tokens_per_segment,

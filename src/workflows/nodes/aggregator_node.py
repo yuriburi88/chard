@@ -236,12 +236,123 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
         "llm_verification_used": llm_used,
     }
 
+    # 키워드 카테고리 분류 (Macro/Crypto Native/Crypto-Macro)
+    categorized_keywords = {}
+    narrative_config = config.get("narrative", {})
+    enable_segmentation = narrative_config.get("enable_segmentation", True)
+
+    if enable_segmentation and final_keywords:
+        try:
+            from src.workflows.keyword_categories import KeywordCategorizer
+            from src.workflows.dynamic_keywords import DynamicKeywordManager
+            from src.workflows.keyword_learner import KeywordLearner
+
+            # 동적 키워드 학습 설정 로드
+            dynamic_config = narrative_config.get("dynamic_keywords", {})
+            dynamic_enabled = dynamic_config.get("enabled", True)
+            learning_top_n = dynamic_config.get("learning_top_n", 30)
+            min_frequency = dynamic_config.get("min_frequency", 2)
+            ttl_hours = dynamic_config.get("ttl_hours", 24)
+            cache_file = dynamic_config.get("cache_file", "dynamic_keywords_cache.json")
+
+            # 동적 키워드 관리자 초기화
+            dynamic_manager = None
+            if dynamic_enabled:
+                try:
+                    dynamic_manager = DynamicKeywordManager(
+                        cache_file=cache_file,
+                        ttl_hours=ttl_hours
+                    )
+
+                    # LLM 클라이언트 생성하여 키워드 학습
+                    try:
+                        llm_config = config.get("llm", {})
+                        model = llm_config.get("model", "gemini-2.5-flash")
+                        temperature = llm_config.get("temperature", 0.1)
+                        max_tokens = llm_config.get("max_tokens", 8000)
+
+                        gemini_client = GeminiClient(
+                            model=model,
+                            temperature=temperature,
+                            max_tokens=max_tokens
+                        )
+
+                        learner = KeywordLearner(gemini_client)
+                        learned_keywords = learner.learn_keywords(
+                            final_keywords,
+                            top_n=learning_top_n,
+                            min_frequency=min_frequency
+                        )
+
+                        # 학습한 키워드를 캐시에 업데이트
+                        if learned_keywords:
+                            dynamic_manager.update_keywords(learned_keywords)
+                            logger.info(
+                                "[AggregatorNode] 동적 키워드 학습 완료: "
+                                "Macro=%d, Crypto Native=%d, Crypto-Macro=%d",
+                                len(learned_keywords.get("macro", [])),
+                                len(learned_keywords.get("crypto_native", [])),
+                                len(learned_keywords.get("crypto_macro", []))
+                            )
+                    except Exception as learning_exc:  # noqa: BLE001
+                        logger.warning(
+                            "[AggregatorNode] 키워드 학습 실패: %s",
+                            learning_exc
+                        )
+
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "[AggregatorNode] 동적 키워드 학습 실패 (고정 키워드만 사용): %s",
+                        exc
+                    )
+                    dynamic_manager = None
+
+            # 키워드 분류 (고정 + 동적)
+            categorizer = KeywordCategorizer(dynamic_manager=dynamic_manager)
+
+            # 카테고리별 차등 임계값 로드 (Phase 2)
+            category_thresholds = narrative_config.get("category_thresholds")
+            if category_thresholds is None:
+                # 하위 호환성: min_category_confidence 사용
+                min_confidence = narrative_config.get("min_category_confidence", 0.5)
+                category_thresholds = {
+                    "macro": min_confidence,
+                    "crypto_native": min_confidence,
+                    "crypto_macro": min_confidence
+                }
+
+            # 멀티 레이블 분류 사용 (중복 허용, 카테고리별 차등 임계값 적용)
+            categorized_keywords = categorizer.categorize_keywords_multilabel(
+                final_keywords,
+                category_thresholds=category_thresholds
+            )
+
+            category_summary = categorizer.get_category_summary(categorized_keywords)
+            logger.info(
+                "[AggregatorNode] 키워드 카테고리 분류 완료 (멀티 레이블): %s",
+                json.dumps(category_summary, ensure_ascii=False)
+            )
+
+            scoring_summary["categorized_keywords"] = category_summary
+
+        except Exception as exc:  # noqa: BLE001
+            error_msg = f"AggregatorNode: 키워드 카테고리 분류 실패 - {exc}"
+            logger.error("[AggregatorNode] %s", error_msg, exc_info=True)
+            errors.append(error_msg)
+    else:
+        logger.info(
+            "[AggregatorNode] 키워드 카테고리 분류 건너뜀 (enable_segmentation=%s, keywords=%d)",
+            enable_segmentation,
+            len(final_keywords)
+        )
+
     return {
         **state,
         "clustered_keywords": clustered_keywords,
         "scored_keywords": scored_keywords,
         "candidate_keywords": candidate_keywords,
         "aggregated_keywords": final_keywords,
+        "categorized_keywords": categorized_keywords,
         "llm_verification_result": llm_verification_result,
         "errors": errors,
         "scoring_summary": scoring_summary,

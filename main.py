@@ -200,33 +200,63 @@ def load_config(config_path: str) -> AppConfig:
 def calculate_min_timestamp(app_config: AppConfig) -> Optional[datetime]:
     """
     수집 기간 설정에 따라 최소 타임스탬프를 계산합니다.
-    
+
+    두 가지 모드 지원:
+    - "recent_hours": 현재 시간에서 N시간 전까지 (기존 방식)
+    - "days_back": N일 전 00:00부터 현재까지 (날짜 기준, display_timezone 적용)
+
     Args:
         app_config: 애플리케이션 설정 객체
-    
+
     Returns:
         최소 타임스탬프 (UTC) 또는 None (필터링 안 함)
     """
     period = app_config.collection_period
-    
-    # start_time이 있으면 우선 사용
+    logger = logging.getLogger(__name__)
+
+    # start_time이 있으면 우선 사용 (직접 지정 모드)
     if period.start_time:
         try:
             from dateutil import parser
             min_timestamp = parser.parse(period.start_time)
             if min_timestamp.tzinfo is None:
                 min_timestamp = min_timestamp.replace(tzinfo=timezone.utc)
+            logger.info(f"수집 기간: start_time 직접 지정 - {min_timestamp.isoformat()}")
             return min_timestamp
         except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.warning(f"start_time 파싱 실패: {e}, recent_hours 사용")
-    
-    # recent_hours가 있으면 현재 시간에서 빼기
+            logger.warning(f"start_time 파싱 실패: {e}, mode 설정 사용")
+
+    mode = getattr(period, 'mode', 'recent_hours')
+
+    # days_back 모드: N일 전 00:00부터 (display_timezone 기준)
+    if mode == "days_back" and period.days_back is not None:
+        display_tz_offset = app_config.output.display_timezone
+        display_tz = timezone(timedelta(hours=display_tz_offset))
+
+        # 현재 시간을 display_timezone으로 변환
+        now_local = datetime.now(display_tz)
+
+        # N일 전 날짜의 00:00:00 계산
+        target_date = now_local.date() - timedelta(days=period.days_back)
+        min_timestamp_local = datetime.combine(target_date, datetime.min.time(), tzinfo=display_tz)
+
+        # UTC로 변환
+        min_timestamp = min_timestamp_local.astimezone(timezone.utc)
+
+        logger.info(
+            f"수집 기간: days_back={period.days_back} - "
+            f"{target_date.strftime('%Y-%m-%d')} 00:00 (UTC{display_tz_offset:+d}) ~ 현재"
+        )
+        return min_timestamp
+
+    # recent_hours 모드: 현재 시간에서 N시간 전 (기존 방식)
     if period.recent_hours:
         min_timestamp = datetime.now(timezone.utc) - timedelta(hours=period.recent_hours)
+        logger.info(f"수집 기간: recent_hours={period.recent_hours} - {min_timestamp.isoformat()} ~ 현재")
         return min_timestamp
-    
+
     # 둘 다 없으면 None (모든 데이터 수집)
+    logger.info("수집 기간: 제한 없음 (모든 데이터 수집)")
     return None
 
 

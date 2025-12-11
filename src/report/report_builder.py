@@ -50,10 +50,24 @@ def build_json_report(state: AnalysisState) -> Dict[str, Any]:
         "errors": errors,
     }
 
+    # 내러티브 문단 수 계산 (세분화 모드 대응)
+    narratives = insights.get("narratives")
+    if narratives and isinstance(narratives, dict):
+        # 세분화된 내러티브
+        total_paragraphs = sum(
+            len(narratives.get(cat, []))
+            for cat in ["macro", "crypto_native", "crypto_macro", "integrated"]
+        )
+        narrative_info = f"세분화된 내러티브 {total_paragraphs}개 문단"
+    else:
+        # 기존 방식
+        narrative_summary = insights.get("narrative_summary", [])
+        narrative_info = f"내러티브 요약 {len(narrative_summary)}개 문단"
+
     logger.info(
         "[ReportBuilder] JSON 리포트 생성 완료: "
         f"키워드 {len(top_keywords)}개, "
-        f"내러티브 요약 {len(insights.get('narrative_summary', []))}개 문단, "
+        f"{narrative_info}, "
         f"에러 {len(errors)}개"
     )
 
@@ -91,6 +105,9 @@ def build_markdown_report(
     # 거래 인사이트 섹션
     insights_section = _build_markdown_insights_section(state)
 
+    # 품질 평가 섹션 (Phase 3)
+    quality_section = _build_markdown_quality_section(state)
+
     # 주요 출처 섹션
     sources_section = _build_markdown_sources_section(state)
 
@@ -103,8 +120,13 @@ def build_markdown_report(
         keywords_section,
         narrative_section,
         insights_section,
-        sources_section,
     ]
+
+    # 품질 평가 섹션 추가 (있는 경우만)
+    if quality_section:
+        markdown_parts.append(quality_section)
+
+    markdown_parts.append(sources_section)
 
     if errors_section:
         markdown_parts.append(errors_section)
@@ -326,6 +348,15 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
     """
     내러티브 요약 섹션을 생성합니다.
 
+    세분화 모드 활성화 시:
+        - Macro 내러티브 요약
+        - Crypto Native 내러티브 요약
+        - Crypto-Macro 내러티브 요약
+        - 통합 내러티브 요약
+
+    세분화 모드 비활성화 시:
+        - 시장 내러티브 요약 (기존 방식)
+
     Args:
         state: LangGraph 워크플로 상태
 
@@ -333,19 +364,54 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
         Markdown 내러티브 요약 섹션 문자열
     """
     insights = state.get("insights", {})
-    narrative_summary = insights.get("narrative_summary", [])
 
-    if not narrative_summary:
-        return "## 시장 내러티브 요약\n\n내러티브 요약이 없습니다."
+    # 세분화 모드 확인
+    narratives = insights.get("narratives")
 
-    # 각 문단을 별도 줄로 표시
-    paragraphs = []
-    for idx, paragraph in enumerate(narrative_summary, start=1):
-        paragraphs.append(f"{paragraph}")
+    if narratives and isinstance(narratives, dict):
+        # 세분화된 내러티브 처리
+        sections = []
 
-    section = "## 시장 내러티브 요약\n\n" + "\n\n".join(paragraphs)
+        # Macro 내러티브
+        macro_narratives = narratives.get("macro", [])
+        if macro_narratives:
+            sections.append("### Macro 내러티브 요약\n\n" + "\n\n".join(macro_narratives))
 
-    return section
+        # Crypto Native 내러티브
+        crypto_native_narratives = narratives.get("crypto_native", [])
+        if crypto_native_narratives:
+            sections.append("### Crypto Native 내러티브 요약\n\n" + "\n\n".join(crypto_native_narratives))
+
+        # Crypto-Macro 내러티브
+        crypto_macro_narratives = narratives.get("crypto_macro", [])
+        if crypto_macro_narratives:
+            sections.append("### Crypto-Macro 내러티브 요약\n\n" + "\n\n".join(crypto_macro_narratives))
+
+        # 통합 내러티브
+        integrated_narratives = narratives.get("integrated", [])
+        if integrated_narratives:
+            sections.append("### 통합 내러티브 요약\n\n" + "\n\n".join(integrated_narratives))
+
+        if not sections:
+            return "## 시장 내러티브 요약\n\n내러티브 요약이 없습니다."
+
+        return "## 시장 내러티브 요약\n\n" + "\n\n".join(sections)
+
+    else:
+        # 기존 방식: 단일 내러티브 요약
+        narrative_summary = insights.get("narrative_summary", [])
+
+        if not narrative_summary:
+            return "## 시장 내러티브 요약\n\n내러티브 요약이 없습니다."
+
+        # 각 문단을 별도 줄로 표시
+        paragraphs = []
+        for idx, paragraph in enumerate(narrative_summary, start=1):
+            paragraphs.append(f"{paragraph}")
+
+        section = "## 시장 내러티브 요약\n\n" + "\n\n".join(paragraphs)
+
+        return section
 
 
 def _build_markdown_insights_section(state: AnalysisState) -> str:
@@ -366,7 +432,40 @@ def _build_markdown_insights_section(state: AnalysisState) -> str:
 
     opportunities = trading_insights.get("opportunities", [])
     risks = trading_insights.get("risks", [])
-    market_sentiment = trading_insights.get("market_sentiment", "N/A")
+
+    # 방향성 심리 추출
+    direction_sentiment = trading_insights.get("direction_sentiment", {})
+    if isinstance(direction_sentiment, dict):
+        direction_value = direction_sentiment.get("value", "N/A")
+        direction_confidence = direction_sentiment.get("confidence", 0)
+        direction_keywords = direction_sentiment.get("rationale_keywords", [])
+    else:
+        # 하위 호환성
+        direction_value = str(direction_sentiment) if direction_sentiment else "N/A"
+        direction_confidence = 0
+        direction_keywords = []
+
+    # 변동성 심리 추출
+    volatility_sentiment = trading_insights.get("volatility_sentiment", {})
+    if isinstance(volatility_sentiment, dict):
+        volatility_value = volatility_sentiment.get("value", "N/A")
+        volatility_confidence = volatility_sentiment.get("confidence", 0)
+        volatility_keywords = volatility_sentiment.get("rationale_keywords", [])
+    else:
+        # 하위 호환성
+        volatility_value = str(volatility_sentiment) if volatility_sentiment else "N/A"
+        volatility_confidence = 0
+        volatility_keywords = []
+
+    # 하위 호환성: 기존 market_sentiment 필드 처리
+    if "market_sentiment" in trading_insights and "direction_sentiment" not in trading_insights:
+        old_sentiment = trading_insights.get("market_sentiment", "N/A")
+        direction_value = str(old_sentiment)
+        direction_confidence = 0
+        direction_keywords = []
+        volatility_value = "N/A"
+        volatility_confidence = 0
+        volatility_keywords = []
 
     # 기회 섹션
     opportunities_text = "### 기회\n\n"
@@ -384,8 +483,17 @@ def _build_markdown_insights_section(state: AnalysisState) -> str:
     else:
         risks_text += "위험 항목이 없습니다.\n"
 
-    # 시장 심리 섹션
-    sentiment_text = f"### 시장 심리\n\n{market_sentiment}\n"
+    # 시장 심리 섹션 (방향성 + 변동성)
+    direction_keywords_str = ", ".join(direction_keywords) if direction_keywords else "-"
+    volatility_keywords_str = ", ".join(volatility_keywords) if volatility_keywords else "-"
+
+    sentiment_text = f"""### 시장 심리
+
+| 구분 | 판단 | 신뢰도 | 근거 키워드 |
+|------|------|--------|-------------|
+| 📈 방향성 | {direction_value} | {direction_confidence}% | {direction_keywords_str} |
+| 📊 변동성 | {volatility_value} | {volatility_confidence}% | {volatility_keywords_str} |
+"""
 
     section = (
         "## 거래 인사이트\n\n"
@@ -445,6 +553,132 @@ def _build_markdown_sources_section(state: AnalysisState) -> str:
     section = "## 주요 출처\n\n" + "\n".join(source_items)
 
     return section
+
+
+def _build_markdown_quality_section(state: AnalysisState) -> str:
+    """
+    품질 평가 섹션을 생성합니다. (Phase 3)
+
+    Args:
+        state: LangGraph 워크플로 상태
+
+    Returns:
+        Markdown 품질 평가 섹션 문자열 (품질 메트릭이 없으면 빈 문자열)
+    """
+    quality_metrics = state.get("quality_metrics")
+
+    if not quality_metrics:
+        logger.debug("[ReportBuilder] quality_metrics가 state에 없습니다. 품질 평가 섹션을 건너뜁니다.")
+        logger.debug(f"[ReportBuilder] state keys: {list(state.keys())}")
+        return ""
+
+    logger.info("[ReportBuilder] 품질 평가 섹션 생성 중...")
+
+    # 전체 품질 점수
+    overall_score = quality_metrics.get("overall_quality_score", 0.0)
+    overall_grade = _get_quality_grade(overall_score)
+
+    # 카테고리 분포
+    categorized = quality_metrics.get("categorized_keywords", {})
+    total_keywords = quality_metrics.get("total_keywords", 0)
+    macro_count = categorized.get("macro", 0)
+    crypto_native_count = categorized.get("crypto_native", 0)
+    crypto_macro_count = categorized.get("crypto_macro", 0)
+
+    # 세부 점수
+    balance_score = quality_metrics.get("category_balance_score", 0.0)
+    narrative_score = quality_metrics.get("narrative_quality_score", 0.0)
+    learning_score = quality_metrics.get("learning_effectiveness", 0.0)
+
+    # 동적 학습 정보
+    dynamic_learned = quality_metrics.get("dynamic_keywords_learned", 0)
+    dynamic_used = quality_metrics.get("dynamic_keywords_used", 0)
+
+    # 내러티브 생성 정보
+    narratives_generated = quality_metrics.get("narratives_generated", {})
+    narrative_status = []
+    for category, generated in narratives_generated.items():
+        status_icon = "✅" if generated else "❌"
+        narrative_status.append(f"{status_icon} {category.replace('_', ' ').title()}")
+
+    # 섹션 생성
+    section_parts = [
+        "## 품질 평가 (Phase 3)",
+        "",
+        f"### 전체 품질: {overall_grade} ({overall_score:.1%})",
+        "",
+        "#### 키워드 분류 분포",
+        "",
+        f"- **총 키워드**: {total_keywords}개",
+        f"- **Macro**: {macro_count}개",
+        f"- **Crypto Native**: {crypto_native_count}개",
+        f"- **Crypto-Macro**: {crypto_macro_count}개",
+        f"- **분류 균형 점수**: {balance_score:.1%}",
+        "",
+        "#### 내러티브 품질",
+        "",
+        "**생성 상태**:",
+    ]
+
+    for status in narrative_status:
+        section_parts.append(f"- {status}")
+
+    section_parts.extend([
+        "",
+        f"**품질 점수**: {narrative_score:.1%}",
+        "",
+        "#### 동적 학습 효율성",
+        "",
+        f"- **학습된 키워드**: {dynamic_learned}개",
+        f"- **사용된 키워드**: {dynamic_used}개",
+        f"- **학습 효율성**: {learning_score:.1%}",
+    ])
+
+    # 경고 및 권장사항
+    warnings = quality_metrics.get("warnings", [])
+    recommendations = quality_metrics.get("recommendations", [])
+
+    if warnings:
+        section_parts.extend([
+            "",
+            "#### ⚠️ 경고",
+            "",
+        ])
+        for warning in warnings:
+            section_parts.append(f"- {warning}")
+
+    if recommendations:
+        section_parts.extend([
+            "",
+            "#### 💡 권장사항",
+            "",
+        ])
+        for rec in recommendations:
+            section_parts.append(f"- {rec}")
+
+    return "\n".join(section_parts)
+
+
+def _get_quality_grade(score: float) -> str:
+    """
+    품질 점수를 등급으로 변환합니다.
+
+    Args:
+        score: 품질 점수 (0.0 ~ 1.0)
+
+    Returns:
+        품질 등급 문자열
+    """
+    if score >= 0.9:
+        return "🌟 Excellent"
+    elif score >= 0.8:
+        return "✨ Very Good"
+    elif score >= 0.7:
+        return "👍 Good"
+    elif score >= 0.6:
+        return "⚠️ Fair"
+    else:
+        return "❌ Poor"
 
 
 def _build_markdown_errors_section(state: AnalysisState) -> str:

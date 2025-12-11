@@ -98,7 +98,7 @@ class AnalysisState(TypedDict, total=False):
     
     aggregated_keywords: List[Dict[str, Any]]
     """통합된 키워드 리스트
-    
+
     AggregatorNode에서 생성된 최종 키워드들입니다.
     임베딩 기반 클러스터링 및 LLM 검증을 거쳐 정규화되었습니다.
     각 키워드는 다음 형식을 따릅니다:
@@ -111,39 +111,106 @@ class AnalysisState(TypedDict, total=False):
         "occurrence_count": 15  # 출현 횟수
     }
     """
-    
+
+    categorized_keywords: Dict[str, List[Dict[str, Any]]]
+    """카테고리별로 분류된 키워드 딕셔너리
+
+    AggregatorNode에서 키워드를 Macro/Crypto Native/Crypto-Macro로 분류한 결과입니다.
+    다음 형식을 따릅니다:
+    {
+        "macro": [키워드1, 키워드2, ...],
+        "crypto_native": [키워드3, 키워드4, ...],
+        "crypto_macro": [키워드5, 키워드6, ...]
+    }
+    각 키워드에는 "category"와 "category_confidence" 필드가 추가됩니다.
+    """
+
     scoring_summary: Dict[str, Any]
     """AggregatorNode에서 계산된 통계 정보
-    
+
     추출/클러스터/스코어링/후보/최종 키워드 수 등을 포함하는 요약 정보입니다.
     """
     
     insights: Dict[str, Any]
     """내러티브 요약 및 거래 인사이트
-    
+
     InsightNode에서 생성된 인사이트입니다.
-    다음 형식을 따릅니다:
+
+    세분화 모드 비활성화 시:
     {
-        "narrative_summary": [
-            "문단1",
-            "문단2",
-            "문단3"
-        ],
+        "narrative_summary": ["문단1", "문단2", "문단3"],
+        "trading_insights": {...},
+        "key_sources": [...]
+    }
+
+    세분화 모드 활성화 시:
+    {
+        "narratives": {
+            "macro": ["Macro 문단1", "Macro 문단2"],
+            "crypto_native": ["Crypto Native 문단1", "Crypto Native 문단2"],
+            "crypto_macro": ["Crypto-Macro 문단1", "Crypto-Macro 문단2"],
+            "integrated": ["통합 문단1", "통합 문단2", "통합 문단3"]
+        },
         "trading_insights": {
             "opportunities": ["인사이트1", "인사이트2"],
             "risks": ["위험1", "위험2"],
-            "market_sentiment": "긍정적/중립적/부정적"
+            "direction_sentiment": {
+                "value": "상승",
+                "confidence": 85,
+                "rationale_keywords": ["키워드1", "키워드2", "키워드3"]
+            },
+            "volatility_sentiment": {
+                "value": "증가",
+                "confidence": 72,
+                "rationale_keywords": ["키워드1", "키워드2"]
+            }
         },
         "key_sources": [
             {
                 "title": "기사 제목 또는 메시지 요약",
                 "url": "링크 (RSS만)",
-                "relevance": "관련 키워드"
+                "relevance": ["관련 키워드"]
             }
         ]
     }
     """
-    
+
+    quality_metrics: Optional[Dict[str, Any]]
+    """품질 평가 메트릭 (Phase 3)
+
+    InsightNode에서 생성된 품질 평가 결과입니다.
+    QualityMetrics dataclass를 dict로 변환한 형태로 저장됩니다.
+
+    {
+        "total_keywords": 150,
+        "categorized_keywords": {
+            "macro": 50,
+            "crypto_native": 60,
+            "crypto_macro": 40
+        },
+        "category_balance_score": 0.85,
+        "narratives_generated": {
+            "macro": True,
+            "crypto_native": True,
+            "crypto_macro": True,
+            "integrated": True
+        },
+        "narrative_lengths": {
+            "macro": 500,
+            "crypto_native": 450,
+            "crypto_macro": 480,
+            "integrated": 600
+        },
+        "narrative_quality_score": 0.92,
+        "dynamic_keywords_learned": 10,
+        "dynamic_keywords_used": 5,
+        "learning_effectiveness": 0.5,
+        "overall_quality_score": 0.78,
+        "warnings": ["경고1", "경고2"],
+        "recommendations": ["권장사항1", "권장사항2"]
+    }
+    """
+
     # 메타데이터
     execution_time: float
     """실행 시간 (초)

@@ -517,7 +517,10 @@ def build_insight_prompt(
         "   - 장황한 설명이나 반복적인 표현을 피하고, 핵심 내용만 압축하여 작성하세요.\n"
         "2. 거래 시사점을 기회(opportunities)와 위험(risks)으로 구분하여 작성하세요.\n"
         "   - 각 목록에는 최소 2개의 구체적인 항목을 포함하세요.\n"
-        "   - 시장 심리(market_sentiment)를 긍정적/중립적/부정적 중 하나로 요약하세요.\n"
+        "   - 시장 심리를 두 가지 측면으로 분석하세요:\n"
+        "     a) direction_sentiment (방향성 심리): 강한상승/상승/중립/하락/강한하락 중 하나\n"
+        "     b) volatility_sentiment (변동성 심리): 급격한증가/증가/안정/감소/급격한감소 중 하나\n"
+        "   - 각 심리 판단에 대해 신뢰도(0-100)와 근거 키워드(최대 3개)를 함께 제시하세요.\n"
         "3. 주요 출처 하이라이트 3~5개를 선택하여 제목, 링크(가능한 경우), 연관 키워드를 제시하세요.\n"
         "4. 모든 응답은 반드시 JSON 형식으로만 출력하세요.\n"
         "5. 근거와 정량 정보(점수, 출처)를 활용해 분석의 신뢰도를 높이세요.\n\n"
@@ -527,7 +530,16 @@ def build_insight_prompt(
         '  "trading_insights": {\n'
         '    "opportunities": ["인사이트1", "인사이트2"],\n'
         '    "risks": ["위험1", "위험2"],\n'
-        '    "market_sentiment": "긍정적"\n'
+        '    "direction_sentiment": {\n'
+        '      "value": "상승",\n'
+        '      "confidence": 85,\n'
+        '      "rationale_keywords": ["키워드1", "키워드2", "키워드3"]\n'
+        '    },\n'
+        '    "volatility_sentiment": {\n'
+        '      "value": "증가",\n'
+        '      "confidence": 72,\n'
+        '      "rationale_keywords": ["키워드1", "키워드2"]\n'
+        '    }\n'
         "  },\n"
         '  "key_sources": [\n'
         "    {\n"
@@ -574,11 +586,62 @@ def parse_insight_response(response_text: str) -> Dict[str, object]:
 
     opportunities = trading_insights_raw.get("opportunities", [])
     risks = trading_insights_raw.get("risks", [])
-    market_sentiment = trading_insights_raw.get("market_sentiment", "중립적")
+
+    # 방향성 심리 파싱
+    direction_sentiment_raw = trading_insights_raw.get("direction_sentiment", {})
+    if isinstance(direction_sentiment_raw, Mapping):
+        direction_sentiment = {
+            "value": str(direction_sentiment_raw.get("value", "중립")).strip() or "중립",
+            "confidence": int(direction_sentiment_raw.get("confidence", 50) or 50),
+            "rationale_keywords": [
+                str(kw).strip() for kw in direction_sentiment_raw.get("rationale_keywords", [])
+                if str(kw).strip()
+            ][:3]  # 최대 3개
+        }
+    else:
+        # 하위 호환성: 문자열로 전달된 경우
+        direction_sentiment = {
+            "value": str(direction_sentiment_raw).strip() or "중립",
+            "confidence": 50,
+            "rationale_keywords": []
+        }
+
+    # 변동성 심리 파싱
+    volatility_sentiment_raw = trading_insights_raw.get("volatility_sentiment", {})
+    if isinstance(volatility_sentiment_raw, Mapping):
+        volatility_sentiment = {
+            "value": str(volatility_sentiment_raw.get("value", "안정")).strip() or "안정",
+            "confidence": int(volatility_sentiment_raw.get("confidence", 50) or 50),
+            "rationale_keywords": [
+                str(kw).strip() for kw in volatility_sentiment_raw.get("rationale_keywords", [])
+                if str(kw).strip()
+            ][:3]  # 최대 3개
+        }
+    else:
+        # 하위 호환성: 문자열로 전달된 경우
+        volatility_sentiment = {
+            "value": str(volatility_sentiment_raw).strip() or "안정",
+            "confidence": 50,
+            "rationale_keywords": []
+        }
+
+    # 하위 호환성: 기존 market_sentiment 필드가 있는 경우
+    if "market_sentiment" in trading_insights_raw and "direction_sentiment" not in trading_insights_raw:
+        old_sentiment = str(trading_insights_raw.get("market_sentiment", "중립적")).strip()
+        # 기존 값을 방향성으로 매핑
+        sentiment_mapping = {
+            "긍정적": "상승",
+            "부정적": "하락",
+            "중립적": "중립",
+        }
+        direction_sentiment = {
+            "value": sentiment_mapping.get(old_sentiment, "중립"),
+            "confidence": 50,
+            "rationale_keywords": []
+        }
 
     normalized_opportunities = [str(item).strip() for item in opportunities if str(item).strip()] if isinstance(opportunities, list) else []
     normalized_risks = [str(item).strip() for item in risks if str(item).strip()] if isinstance(risks, list) else []
-    normalized_sentiment = str(market_sentiment).strip() or "중립적"
 
     key_sources_raw = result.get("key_sources", [])
     if not isinstance(key_sources_raw, list):
@@ -615,7 +678,8 @@ def parse_insight_response(response_text: str) -> Dict[str, object]:
         "trading_insights": {
             "opportunities": normalized_opportunities,
             "risks": normalized_risks,
-            "market_sentiment": normalized_sentiment,
+            "direction_sentiment": direction_sentiment,
+            "volatility_sentiment": volatility_sentiment,
         },
         "key_sources": normalized_sources,
     }
@@ -799,3 +863,258 @@ def _build_source_highlights(
             break
 
     return unique_highlights
+
+
+# ============================================================================
+# 세분화된 내러티브 프롬프트 (Macro / Crypto Native / Crypto-Macro)
+# ============================================================================
+
+def build_macro_narrative_prompt(
+    keywords: List[Dict[str, Any]],
+    source_highlights: List[Dict[str, Any]],
+    num_paragraphs: int = 2
+) -> str:
+    """
+    Macro 내러티브 프롬프트를 생성합니다.
+
+    거시경제 요인(금리, 인플레이션, 주식시장, 규제 등)에 집중한 내러티브를 생성합니다.
+
+    Args:
+        keywords: Macro 카테고리 키워드 리스트
+        source_highlights: 주요 출처 하이라이트
+        num_paragraphs: 생성할 문단 수
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    import json
+
+    keywords_json = json.dumps(keywords, ensure_ascii=False, indent=2)
+    sources_json = json.dumps(source_highlights, ensure_ascii=False, indent=2)
+
+    system_prompt = (
+        "당신은 거시경제 전문 분석가입니다.\n"
+        "글로벌 금융시장, 중앙은행 정책, 경제 지표, 규제 동향 등 거시경제 요인이 "
+        "금리, 주식, 환율, Commodity, 암호화폐 시장에 미치는 영향을 분석하세요."
+    )
+
+    user_prompt = (
+        "다음은 거시경제 관련 키워드입니다:\n\n"
+        f"{keywords_json}\n\n"
+        f"참고용 주요 출처:\n\n{sources_json}\n\n"
+        "요구사항:\n"
+        f"1. Macro(거시경제) 내러티브를 {num_paragraphs}개 문단으로 작성하세요.\n"
+        "   - 각 문단은 간결하게 작성하세요 (문단당 100~150자).\n"
+        "   - 금리, 경제 지표, 인플레이션, 주식시장, 환율, 규제 등 전통 금융 요인에 집중하세요.\n"
+        "   - 중앙은행 정책(연준, ECB 등)의 변화와 시장 반응을 포함하세요.\n"
+        "   - 정량적 데이터(금리 %, 지수 변화, 경제지표 발표 등)를 가능한 포함하세요.\n"
+        "   - 시장의 Event들을 정리하고 그 Event들이 금리/주식/환율/Commodity 시장에 미칠 영향을 분석하세요.\n"
+        "   - 금리/주식/환율/Commodity등 각 시장이 서로에게 미칠 수 있는 원인들을 분석하세요.\n"
+        "   - 시장에 미칠 영향은 근거를 명확하게 작성해주세요.\n"
+        "2. 모든 응답은 반드시 JSON 형식으로만 출력하세요.\n\n"
+        "응답 형식 (JSON):\n"
+        "{\n"
+        f'  "narrative": ["문단1", "문단2"{", ..." if num_paragraphs > 2 else ""}]\n'
+        "}"
+    )
+
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def build_crypto_native_narrative_prompt(
+    keywords: List[Dict[str, Any]],
+    source_highlights: List[Dict[str, Any]],
+    num_paragraphs: int = 2
+) -> str:
+    """
+    Crypto Native 내러티브 프롬프트를 생성합니다.
+
+    블록체인 기술, DeFi, NFT, 프로토콜 업데이트 등 암호화폐 고유 동향에 집중합니다.
+
+    Args:
+        keywords: Crypto Native 카테고리 키워드 리스트
+        source_highlights: 주요 출처 하이라이트
+        num_paragraphs: 생성할 문단 수
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    import json
+
+    keywords_json = json.dumps(keywords, ensure_ascii=False, indent=2)
+    sources_json = json.dumps(source_highlights, ensure_ascii=False, indent=2)
+
+    system_prompt = (
+        "당신은 월스트리트의 최고 투자 책임자(CIO)에게 보고하는 최고 수준의 가상자산 시장 전략가입니다. \n"
+        "당신의 목표는 제공된 데이터(뉴스 기사 및 텔레그램 대화)에서 현재 시장을 움직이는 핵심 내러티브를 추출하고, \n"
+        "이를 바탕으로 시장 심리와 전망을 분석하는 것입니다."
+    )
+
+    user_prompt = (
+        "다음은 Crypto Native 관련 키워드입니다:\n\n"
+        f"{keywords_json}\n\n"
+        f"참고용 주요 출처:\n\n{sources_json}\n\n"
+        "요구사항:\n"
+        f"1. 당신은 다음 단계의 분석을 반드시 수행해야 합니다.\n"
+        "   - 데이터 필터링 및 정량화: 모든 데이터를 스캔하여 가장 빈번하게 언급된 키워드/주제 상위 10개를 추출하고, 각 키워드에 대한 언급량(빈도수)을 대략적으로 파악합니다.\n"
+        "   - 핵심 내러티브 도출: 빈도수와 내용의 중요성을 종합하여, 현재 시장 참여자들의 집단 심리를 가장 강력하게 지배하는 상위 5가지 이내의 핵심 내러티브를 도출하십시오.\n"
+        "   - 각 내러티브의 근거 제시: 도출된 각 내러티브에 대해, 뉴스(기관/규제 동향)와 텔레그램 대화(개인 투자자 심리)에서 발견된 가장 결정적인 2~3가지 근거 문장을 인용하여 제시하십시오.\n"
+        "   - 시장 심리 분석: 각 내러티브의 성격(긍정적/부정적/중립적)을 종합하여 현재 시장의 전반적인 심리 상태를 낙관(Bullish), 중립(Neutral), 비관(Bearish) 중 하나로 명확히 판단하십시오.\n"
+        "2. Crypto Native(암호화폐 고유 동향) 내러티브를 {num_paragraphs}개 문단으로 작성하세요.\n"
+        "   - 각 문단은 간결하게 작성하세요 (문단당 100~200자).\n"
+        "   - 첫 번째 문단은, 핵심 성장 동력 분석.\n"
+        "       - 현재 가장 강력하게 시장 성장을 견인하는 Crypto Native 트렌드 (예: L2 경쟁 심화, 특정 RWA 프로토콜의 급부상) 하나를 집중 분석하고, 해당 트렌드의 온체인 근거 (TVL 급증, 트랜잭션 수 증가 등)를 명확히 제시하며 시장 전반의 긍정적 기대감을 서술하세요..\n"
+        "   - 두 번째 문단은, 주요 체인 영향 및 연관관계 분석.\n"
+        "       - 문단 1에서 분석한 트렌드와 기술적/네트워크적 이벤트 (프로토콜 업데이트, 대형 에어드롭 스냅샷 등)를 연결하여, 이것이 BTC/ETH 등 주요 코인의 펀더멘털 및 관련 L1/L2 체인의 생태계 활성화에 미치는 영향을 구체적으로 분석하세요. (예: L2 활성화가 ETH 가치에 미치는 긍정적 영향).\n"
+        "   - 세 번째 문단은, 리스크와 심리적 불안 요인 분석.\n"
+        "       - 해킹, 러그풀, FUD 등 부정적인 내용 중에서도 시장 참여자들의 심리를 가장 위축시킨 핵심 리스크를 선정하여 분석하세요. 이 리스크가 투자자들의 리스크 회피 심리와 단기 매도 압력에 미치는 영향을 강조하여 서술하세요.\n"
+        "3. 모든 응답은 반드시 JSON 형식으로만 출력하세요.\n\n"
+        "응답 형식 (JSON):\n"
+        "{\n"
+        f'  "narrative": ["문단1", "문단2"{", ..." if num_paragraphs > 2 else ""}]\n'
+        "}"
+    )
+
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def build_crypto_macro_narrative_prompt(
+    keywords: List[Dict[str, Any]],
+    source_highlights: List[Dict[str, Any]],
+    num_paragraphs: int = 2
+) -> str:
+    """
+    Crypto-Macro 내러티브 프롬프트를 생성합니다.
+
+    ETF, 기관 투자, 규제, 메인스트림 채택 등 교차 영향을 분석합니다.
+
+    Args:
+        keywords: Crypto-Macro 카테고리 키워드 리스트
+        source_highlights: 주요 출처 하이라이트
+        num_paragraphs: 생성할 문단 수
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    import json
+
+    keywords_json = json.dumps(keywords, ensure_ascii=False, indent=2)
+    sources_json = json.dumps(source_highlights, ensure_ascii=False, indent=2)
+
+    system_prompt = (
+        "당신은 암호화폐와 전통 금융의 교차점을 분석하는 전문가입니다.\n"
+        "기관 투자, ETF, 규제, 메인스트림 채택 등 두 세계가 만나는 영역의 "
+        "동향과 그 영향을 분석하세요."
+    )
+
+    user_prompt = (
+        "다음은 Crypto-Macro(교차 영향) 관련 키워드입니다:\n\n"
+        f"{keywords_json}\n\n"
+        f"참고용 주요 출처:\n\n{sources_json}\n\n"
+        "요구사항:\n"
+        f"1. Crypto-Macro(교차 영향) 내러티브를 {num_paragraphs}개 문단으로 작성하세요.\n"
+        "   - 각 문단은 간결하게 작성하세요 (문단당 100~150자).\n"
+        "   - ETF 승인, 기관 투자 유입, 상장 등 자본 흐름에 집중하세요.\n"
+        "   - SEC, CFTC 등 규제 당국의 움직임과 법적 판결을 분석하세요.\n"
+        "   - 전통 금융 기관(블랙록, 피델리티 등)의 암호화폐 진출을 다루세요.\n"
+        "   - 메인스트림 채택(결제, CBDC 등) 동향을 포함하세요.\n"
+        "2. 모든 응답은 반드시 JSON 형식으로만 출력하세요.\n\n"
+        "응답 형식 (JSON):\n"
+        "{\n"
+        f'  "narrative": ["문단1", "문단2"{", ..." if num_paragraphs > 2 else ""}]\n'
+        "}"
+    )
+
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def build_integrated_narrative_prompt(
+    macro_narrative: List[str],
+    crypto_native_narrative: List[str],
+    crypto_macro_narrative: List[str],
+    all_keywords: List[Dict[str, Any]],
+    num_paragraphs: int = 3
+) -> str:
+    """
+    통합 내러티브 프롬프트를 생성합니다.
+
+    3개 카테고리의 내러티브를 종합하여 전체 시장 그림을 그립니다.
+
+    Args:
+        macro_narrative: Macro 내러티브 문단 리스트
+        crypto_native_narrative: Crypto Native 내러티브 문단 리스트
+        crypto_macro_narrative: Crypto-Macro 내러티브 문단 리스트
+        all_keywords: 전체 키워드 리스트
+        num_paragraphs: 생성할 문단 수
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    import json
+
+    keywords_json = json.dumps(all_keywords[:15], ensure_ascii=False, indent=2)  # 상위 15개만
+
+    system_prompt = (
+        "당신은 디지털 자산 시장 전체를 조망하는 수석 분석가입니다.\n"
+        "거시경제, 암호화폐 고유 동향, 두 세계의 교차점을 모두 고려하여 "
+        "통합적인 시장 전망을 제시하세요."
+    )
+
+    macro_text = "\n".join(f"- {p}" for p in macro_narrative)
+    crypto_native_text = "\n".join(f"- {p}" for p in crypto_native_narrative)
+    crypto_macro_text = "\n".join(f"- {p}" for p in crypto_macro_narrative)
+
+    user_prompt = (
+        "다음은 카테고리별로 분석된 내러티브입니다:\n\n"
+        "**Macro (거시경제)**:\n"
+        f"{macro_text}\n\n"
+        "**Crypto Native (암호화폐 고유 동향)**:\n"
+        f"{crypto_native_text}\n\n"
+        "**Crypto-Macro (교차 영향)**:\n"
+        f"{crypto_macro_text}\n\n"
+        f"**주요 키워드**:\n{keywords_json}\n\n"
+        "요구사항:\n"
+        f"1. 위 3개 카테고리를 종합한 통합 내러티브를 {num_paragraphs}개 문단으로 작성하세요.\n"
+        "   - 각 문단은 간결하게 작성하세요 (문단당 100~150자).\n"
+        "   - 거시경제, 암호화폐 고유 동향, 교차 영향을 유기적으로 연결하세요.\n"
+        "   - 전체 시장의 큰 그림과 주요 투자 테마를 제시하세요.\n"
+        "   - 단순 요약이 아닌, 카테고리 간 상호작용과 시너지를 분석하세요.\n"
+        "   - 투자자 관점에서 실용적인 시사점을 도출하세요.\n"
+        "2. 모든 응답은 반드시 JSON 형식으로만 출력하세요.\n\n"
+        "응답 형식 (JSON):\n"
+        "{\n"
+        f'  "narrative": ["문단1", "문단2", "문단3"{", ..." if num_paragraphs > 3 else ""}]\n'
+        "}"
+    )
+
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def parse_narrative_response(response_text: str, category: str) -> List[str]:
+    """
+    카테고리별 내러티브 응답을 파싱합니다.
+
+    Args:
+        response_text: LLM 응답 텍스트
+        category: 카테고리 이름 (에러 메시지용)
+
+    Returns:
+        내러티브 문단 리스트
+
+    Raises:
+        ValueError: 응답 구조가 예상과 다를 때
+    """
+    result = parse_json_from_llm_response(response_text, context=f"{category} Narrative 응답")
+
+    if "narrative" not in result:
+        raise ValueError(f"{category} Narrative 응답에 'narrative' 필드가 없습니다.")
+
+    narrative = result.get("narrative")
+    if not isinstance(narrative, list) or not narrative:
+        raise ValueError(f"'{category} narrative'는 비어있지 않은 리스트여야 합니다.")
+
+    normalized_narrative = [str(paragraph).strip() for paragraph in narrative if str(paragraph).strip()]
+    if not normalized_narrative:
+        raise ValueError(f"'{category} narrative'에 유효한 문단이 없습니다.")
+
+    return normalized_narrative
