@@ -1,13 +1,18 @@
 """
 키워드 카테고리 분류 규칙
 
-키워드를 Macro, Crypto Native, Crypto-Macro 카테고리로 분류합니다.
+키워드를 Macro, Crypto 카테고리로 분류합니다.
+(기존 Crypto Native + Crypto-Macro를 Crypto로 통합)
 """
 
-from typing import List, Dict, Set, Literal, Optional
+from typing import List, Dict, Literal
 from dataclasses import dataclass
 
-CategoryType = Literal["macro", "crypto_native", "crypto_macro"]
+# 새로운 2-카테고리 시스템
+CategoryType = Literal["macro", "crypto"]
+
+# 하위 호환성을 위한 기존 타입 (deprecated)
+LegacyCategoryType = Literal["macro", "crypto_native", "crypto_macro"]
 
 
 # ============================================================================
@@ -58,6 +63,10 @@ MACRO_KEYWORDS = {
 
     # 기타 금융/투자
     "연기금", "국민연금", "pension", "sovereign wealth",
+
+    # 규제 기관 (일반)
+    "sec", "증권거래위원회", "cftc", "금융당국", "규제", "regulation",
+    "경제 지표", "cpi", "gdp", "고용지표", "실업률",
 }
 
 # ============================================================================
@@ -185,6 +194,11 @@ CRYPTO_MACRO_KEYWORDS = {
     "ai 및 웹3", "ai/web3",
 }
 
+# ============================================================================
+# Crypto 통합 키워드: Crypto Native + Crypto-Macro 병합
+# ============================================================================
+CRYPTO_KEYWORDS = CRYPTO_NATIVE_KEYWORDS | CRYPTO_MACRO_KEYWORDS
+
 
 @dataclass
 class KeywordCategory:
@@ -202,7 +216,7 @@ class MultiLabelCategory:
 
 
 class KeywordCategorizer:
-    """키워드를 카테고리별로 분류하는 클래스"""
+    """키워드를 카테고리별로 분류하는 클래스 (2-카테고리: Macro, Crypto)"""
 
     def __init__(self, dynamic_manager=None):
         """
@@ -210,8 +224,11 @@ class KeywordCategorizer:
             dynamic_manager: DynamicKeywordManager 인스턴스 (선택사항)
                             제공되면 동적 학습된 키워드도 함께 사용됩니다.
         """
-        # 고정 키워드 세트
+        # 고정 키워드 세트 (2-카테고리 시스템)
         self.macro_set = {kw.lower() for kw in MACRO_KEYWORDS}
+        self.crypto_set = {kw.lower() for kw in CRYPTO_KEYWORDS}
+
+        # 하위 호환성을 위한 레거시 세트 (deprecated)
         self.crypto_native_set = {kw.lower() for kw in CRYPTO_NATIVE_KEYWORDS}
         self.crypto_macro_set = {kw.lower() for kw in CRYPTO_MACRO_KEYWORDS}
 
@@ -219,12 +236,14 @@ class KeywordCategorizer:
         if dynamic_manager:
             dynamic_keywords = dynamic_manager.get_all_keywords()
             self.macro_set.update(dynamic_keywords.get("macro", set()))
-            self.crypto_native_set.update(dynamic_keywords.get("crypto_native", set()))
-            self.crypto_macro_set.update(dynamic_keywords.get("crypto_macro", set()))
+            # crypto_native와 crypto_macro를 모두 crypto로 병합
+            self.crypto_set.update(dynamic_keywords.get("crypto", set()))
+            self.crypto_set.update(dynamic_keywords.get("crypto_native", set()))
+            self.crypto_set.update(dynamic_keywords.get("crypto_macro", set()))
 
     def categorize_keyword(self, keyword: str) -> KeywordCategory:
         """
-        단일 키워드를 카테고리로 분류
+        단일 키워드를 카테고리로 분류 (2-카테고리: Macro, Crypto)
 
         Args:
             keyword: 분류할 키워드
@@ -235,44 +254,33 @@ class KeywordCategorizer:
         keyword_lower = keyword.lower()
 
         # 정확히 일치하는 경우
-        if keyword_lower in self.crypto_macro_set:
-            return KeywordCategory(keyword, "crypto_macro", 1.0)
         if keyword_lower in self.macro_set:
             return KeywordCategory(keyword, "macro", 1.0)
-        if keyword_lower in self.crypto_native_set:
-            return KeywordCategory(keyword, "crypto_native", 1.0)
+        if keyword_lower in self.crypto_set:
+            return KeywordCategory(keyword, "crypto", 1.0)
 
         # 부분 매칭 (신뢰도 낮음)
         max_confidence = 0.0
-        best_category: CategoryType = "crypto_native"  # 기본값
+        best_category: CategoryType = "crypto"  # 기본값
 
-        # Crypto-Macro 부분 매칭 확인 (우선순위 높음)
-        for ref_kw in self.crypto_macro_set:
+        # Macro 부분 매칭 확인
+        for ref_kw in self.macro_set:
             if ref_kw in keyword_lower or keyword_lower in ref_kw:
                 confidence = len(ref_kw) / max(len(keyword_lower), len(ref_kw))
                 if confidence > max_confidence:
                     max_confidence = confidence
-                    best_category = "crypto_macro"
+                    best_category = "macro"
 
-        # Macro 부분 매칭 확인
+        # Crypto 부분 매칭 확인
         if max_confidence < 0.5:
-            for ref_kw in self.macro_set:
+            for ref_kw in self.crypto_set:
                 if ref_kw in keyword_lower or keyword_lower in ref_kw:
                     confidence = len(ref_kw) / max(len(keyword_lower), len(ref_kw))
                     if confidence > max_confidence:
                         max_confidence = confidence
-                        best_category = "macro"
+                        best_category = "crypto"
 
-        # Crypto Native 부분 매칭 확인
-        if max_confidence < 0.5:
-            for ref_kw in self.crypto_native_set:
-                if ref_kw in keyword_lower or keyword_lower in ref_kw:
-                    confidence = len(ref_kw) / max(len(keyword_lower), len(ref_kw))
-                    if confidence > max_confidence:
-                        max_confidence = confidence
-                        best_category = "crypto_native"
-
-        # 매칭 실패 시 기본값 (crypto_native, 낮은 신뢰도)
+        # 매칭 실패 시 기본값 (crypto, 낮은 신뢰도)
         if max_confidence == 0.0:
             max_confidence = 0.3
 
@@ -284,7 +292,7 @@ class KeywordCategorizer:
         min_confidence: float = 0.5
     ) -> Dict[CategoryType, List[Dict]]:
         """
-        키워드 리스트를 카테고리별로 분류
+        키워드 리스트를 카테고리별로 분류 (2-카테고리: Macro, Crypto)
 
         Args:
             keywords: 키워드 딕셔너리 리스트 (AggregatorNode 출력 형식)
@@ -295,8 +303,7 @@ class KeywordCategorizer:
         """
         categorized: Dict[CategoryType, List[Dict]] = {
             "macro": [],
-            "crypto_native": [],
-            "crypto_macro": []
+            "crypto": []
         }
 
         for kw_dict in keywords:
@@ -315,11 +322,11 @@ class KeywordCategorizer:
 
                 categorized[category_info.category].append(kw_dict_with_category)
             else:
-                # 신뢰도 낮은 경우 crypto_native로 기본 분류
+                # 신뢰도 낮은 경우 crypto로 기본 분류
                 kw_dict_with_category = kw_dict.copy()
-                kw_dict_with_category["category"] = "crypto_native"
+                kw_dict_with_category["category"] = "crypto"
                 kw_dict_with_category["category_confidence"] = 0.3
-                categorized["crypto_native"].append(kw_dict_with_category)
+                categorized["crypto"].append(kw_dict_with_category)
 
         return categorized
 
@@ -329,12 +336,12 @@ class KeywordCategorizer:
         category_thresholds: Dict[CategoryType, float] = None
     ) -> MultiLabelCategory:
         """
-        단일 키워드를 멀티 레이블 방식으로 분류 (여러 카테고리 가능)
+        단일 키워드를 멀티 레이블 방식으로 분류 (2-카테고리: Macro, Crypto)
 
         Args:
             keyword: 분류할 키워드
             category_thresholds: 카테고리별 최소 신뢰도 임계값 (선택사항)
-                예: {"macro": 0.4, "crypto_native": 0.3, "crypto_macro": 0.5}
+                예: {"macro": 0.4, "crypto": 0.3}
 
         Returns:
             MultiLabelCategory 객체 (각 카테고리별 신뢰도 포함)
@@ -345,9 +352,8 @@ class KeywordCategorizer:
         # 기본 임계값: 카테고리별 차등 적용
         if category_thresholds is None:
             category_thresholds = {
-                "macro": 0.4,           # 거시경제: 중간 수준
-                "crypto_native": 0.3,   # 암호화폐 고유: 관대 (기본 카테고리)
-                "crypto_macro": 0.5     # 교차 이슈: 엄격
+                "macro": 0.4,    # 거시경제: 중간 수준
+                "crypto": 0.3,  # 암호화폐: 관대 (기본 카테고리)
             }
 
         # Macro 카테고리 매칭 확인
@@ -355,19 +361,14 @@ class KeywordCategorizer:
         if macro_confidence >= category_thresholds.get("macro", 0.0):
             categories["macro"] = macro_confidence
 
-        # Crypto Native 카테고리 매칭 확인
-        crypto_native_confidence = self._calculate_category_confidence(keyword_lower, self.crypto_native_set)
-        if crypto_native_confidence >= category_thresholds.get("crypto_native", 0.0):
-            categories["crypto_native"] = crypto_native_confidence
+        # Crypto 카테고리 매칭 확인
+        crypto_confidence = self._calculate_category_confidence(keyword_lower, self.crypto_set)
+        if crypto_confidence >= category_thresholds.get("crypto", 0.0):
+            categories["crypto"] = crypto_confidence
 
-        # Crypto-Macro 카테고리 매칭 확인
-        crypto_macro_confidence = self._calculate_category_confidence(keyword_lower, self.crypto_macro_set)
-        if crypto_macro_confidence >= category_thresholds.get("crypto_macro", 0.0):
-            categories["crypto_macro"] = crypto_macro_confidence
-
-        # 아무 카테고리에도 매칭되지 않으면 crypto_native를 기본값으로
+        # 아무 카테고리에도 매칭되지 않으면 crypto를 기본값으로
         if not categories:
-            categories["crypto_native"] = 0.25  # 기본값 약간 낮춤
+            categories["crypto"] = 0.25  # 기본값 약간 낮춤
 
         return MultiLabelCategory(keyword, categories)
 
@@ -440,7 +441,7 @@ class KeywordCategorizer:
         category_thresholds: Dict[CategoryType, float] = None
     ) -> Dict[CategoryType, List[Dict]]:
         """
-        키워드 리스트를 멀티 레이블 방식으로 카테고리별 분류
+        키워드 리스트를 멀티 레이블 방식으로 카테고리별 분류 (2-카테고리: Macro, Crypto)
 
         각 키워드는 여러 카테고리에 동시에 속할 수 있습니다.
 
@@ -448,7 +449,7 @@ class KeywordCategorizer:
             keywords: 키워드 딕셔너리 리스트 (AggregatorNode 출력 형식)
             min_confidence: 전체 카테고리에 적용할 최소 신뢰도 (선택사항, deprecated)
             category_thresholds: 카테고리별 최소 신뢰도 임계값 (선택사항)
-                예: {"macro": 0.4, "crypto_native": 0.3, "crypto_macro": 0.5}
+                예: {"macro": 0.4, "crypto": 0.3}
 
         Returns:
             카테고리별로 분류된 키워드 딕셔너리 (중복 허용)
@@ -457,14 +458,12 @@ class KeywordCategorizer:
         if min_confidence is not None and category_thresholds is None:
             category_thresholds = {
                 "macro": min_confidence,
-                "crypto_native": min_confidence,
-                "crypto_macro": min_confidence
+                "crypto": min_confidence,
             }
 
         categorized: Dict[CategoryType, List[Dict]] = {
             "macro": [],
-            "crypto_native": [],
-            "crypto_macro": []
+            "crypto": []
         }
 
         for kw_dict in keywords:
@@ -489,7 +488,7 @@ class KeywordCategorizer:
         categorized: Dict[CategoryType, List[Dict]]
     ) -> Dict[str, int]:
         """
-        카테고리별 키워드 수 요약
+        카테고리별 키워드 수 요약 (2-카테고리: Macro, Crypto)
 
         Args:
             categorized: categorize_keywords 반환값
@@ -498,8 +497,7 @@ class KeywordCategorizer:
             카테고리별 키워드 개수
         """
         return {
-            "macro": len(categorized["macro"]),
-            "crypto_native": len(categorized["crypto_native"]),
-            "crypto_macro": len(categorized["crypto_macro"]),
+            "macro": len(categorized.get("macro", [])),
+            "crypto": len(categorized.get("crypto", [])),
             "total": sum(len(v) for v in categorized.values())
         }

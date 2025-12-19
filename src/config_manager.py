@@ -122,6 +122,16 @@ class CollectionPeriodConfig:
 
 
 @dataclass
+class EconomicCalendarConfig:
+    """Economic Calendar 수집 설정"""
+    enabled: bool = False  # 수집 활성화 여부
+    countries: List[str] = field(default_factory=lambda: ["united states"])  # 수집 대상 국가
+    importance: str = "high"  # 중요도 필터: high, medium, low, all
+    days_back: int = 7  # 과거 며칠 데이터 수집
+    days_forward: int = 0  # 미래 며칠 예정 일정 수집
+
+
+@dataclass
 class AppConfig:
     """애플리케이션 전체 설정"""
     # 환경 변수
@@ -133,6 +143,7 @@ class AppConfig:
     # 데이터 소스
     rss_sources: List[RSSSourceConfig] = field(default_factory=list)
     telegram_sources: List[TelegramSourceConfig] = field(default_factory=list)
+    economic_calendar: EconomicCalendarConfig = field(default_factory=EconomicCalendarConfig)
 
     # LLM 설정
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -461,11 +472,22 @@ class ConfigManager:
         max_tokens_per_segment = preprocessing_config.get("max_tokens_per_segment", 4000)
         segment_overlap_tokens = preprocessing_config.get("segment_overlap_tokens", 200)
 
+        # Economic Calendar 설정 파싱
+        ec_config = config.get("economic_calendar", {})
+        economic_calendar = EconomicCalendarConfig(
+            enabled=ec_config.get("enabled", False),
+            countries=ec_config.get("countries", ["united states"]),
+            importance=ec_config.get("importance", "high"),
+            days_back=ec_config.get("days_back", 7),
+            days_forward=ec_config.get("days_forward", 0)
+        )
+
         return AppConfig(
             gemini_api_key=env_vars["GEMINI_API_KEY"],
             collection_period=collection_period,
             rss_sources=rss_sources,
             telegram_sources=telegram_sources,
+            economic_calendar=economic_calendar,
             llm=llm,
             normalization=normalization,
             narrative=narrative,

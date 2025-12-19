@@ -41,10 +41,11 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
     """
     AggregatorNode 결과를 기반으로 내러티브 요약 및 거래 인사이트를 생성합니다.
 
-    세분화 모드 활성화 시:
-        1. Macro/Crypto Native/Crypto-Macro 카테고리별 내러티브 생성 (3회 LLM 호출)
-        2. 통합 내러티브 생성 (1회 LLM 호출)
-        3. 거래 인사이트 생성 (기존 방식)
+    세분화 모드 활성화 시 (3단계):
+        1. Macro 내러티브 생성 (1회 LLM 호출)
+        2. Crypto 내러티브 생성 (1회 LLM 호출)
+        3. 통합 내러티브 생성 - Macro/Crypto 참조 (1회 LLM 호출)
+        4. 거래 인사이트 생성 (기존 방식)
 
     세분화 모드 비활성화 시:
         기존 방식대로 단일 내러티브 생성
@@ -156,11 +157,11 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
                         dynamic_cache = {}
 
                     # 내러티브 텍스트 추출 (리스트를 문자열로 변환)
+                    # 2-카테고리 시스템: macro, crypto, integrated
                     narratives_data = insights.get("narratives", {})
                     narratives = {
                         "macro": "\n\n".join(narratives_data.get("macro", [])),
-                        "crypto_native": "\n\n".join(narratives_data.get("crypto_native", [])),
-                        "crypto_macro": "\n\n".join(narratives_data.get("crypto_macro", [])),
+                        "crypto": "\n\n".join(narratives_data.get("crypto", [])),
                         "integrated": "\n\n".join(narratives_data.get("integrated", []))
                     }
 
@@ -354,10 +355,10 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
             dynamic_cache = {}
 
         # 내러티브 텍스트 추출 (비세분화 모드)
+        # 2-카테고리 시스템: macro, crypto, integrated
         narratives = {
             "macro": "",
-            "crypto_native": "",
-            "crypto_macro": "",
+            "crypto": "",
             "integrated": "\n\n".join(insights.get("narrative_summary", []))
         }
 
@@ -447,7 +448,7 @@ async def _generate_segmented_narratives(
     errors: List[str]
 ) -> dict:
     """
-    세분화된 내러티브를 생성합니다 (Macro/Crypto Native/Crypto-Macro/Integrated).
+    세분화된 내러티브를 생성합니다 (Macro/Crypto/Integrated - 3단계).
 
     Args:
         state: LangGraph 상태
@@ -462,8 +463,7 @@ async def _generate_segmented_narratives(
     """
     from src.workflows.prompts import (
         build_macro_narrative_prompt,
-        build_crypto_native_narrative_prompt,
-        build_crypto_macro_narrative_prompt,
+        build_crypto_narrative_prompt,
         build_integrated_narrative_prompt,
         build_insight_prompt,
         parse_narrative_response,
@@ -471,25 +471,32 @@ async def _generate_segmented_narratives(
         prepare_insight_prompt_inputs,
     )
 
-    macro_paragraphs = int(narrative_config.get("macro_paragraphs", 2))
-    crypto_native_paragraphs = int(narrative_config.get("crypto_native_paragraphs", 2))
-    crypto_macro_paragraphs = int(narrative_config.get("crypto_macro_paragraphs", 2))
+    # 문단 수 설정
+    crypto_paragraphs = int(narrative_config.get("crypto_paragraphs", 2))
     integrated_paragraphs = int(narrative_config.get("integrated_paragraphs", 3))
 
     id_mapping = state.get("id_mapping")
 
-    # 카테고리별 키워드 추출
+    # 카테고리별 키워드 추출 (2-카테고리 시스템)
     macro_keywords = list(categorized_keywords.get("macro", []))
-    crypto_native_keywords = list(categorized_keywords.get("crypto_native", []))
-    crypto_macro_keywords = list(categorized_keywords.get("crypto_macro", []))
+    crypto_keywords = list(categorized_keywords.get("crypto", []))
     all_keywords = list(state.get("aggregated_keywords", []))
 
     logger.info(
-        "[InsightNode] 카테고리별 키워드 수: Macro=%d, Crypto Native=%d, Crypto-Macro=%d",
+        "[InsightNode] 카테고리별 키워드 수: Macro=%d, Crypto=%d",
         len(macro_keywords),
-        len(crypto_native_keywords),
-        len(crypto_macro_keywords)
+        len(crypto_keywords)
     )
+
+    # Economic Calendar 이벤트 필터링
+    # 주의: DataNormalizer.to_dict_format()에서 source_type → source로 변환됨
+    economic_events = []
+    for record in raw_records:
+        source = record.get("source") if isinstance(record, dict) else getattr(record, "source", None)
+        if source == "economic_calendar":
+            economic_events.append(record)
+
+    logger.info(f"[InsightNode] Economic Calendar 이벤트: {len(economic_events)}개")
 
     # 출처 하이라이트 준비
     try:
@@ -521,14 +528,14 @@ async def _generate_segmented_narratives(
 
     narratives = {}
 
-    # 1. Macro 내러티브 생성
+    # 1. Macro 내러티브 생성 (항상 2개 문단 고정)
     if macro_keywords:
         try:
-            logger.info("[InsightNode] Macro 내러티브 생성 중...")
+            logger.info("[InsightNode] Macro 내러티브 생성 중 (2개 문단 고정)...")
             macro_prompt = build_macro_narrative_prompt(
                 macro_keywords,
                 source_highlights,
-                num_paragraphs=macro_paragraphs
+                economic_events=economic_events
             )
             macro_response = await llm_client.generate_content_async(
                 prompt=macro_prompt,
@@ -545,63 +552,40 @@ async def _generate_segmented_narratives(
         logger.warning("[InsightNode] Macro 키워드가 없어 내러티브를 건너뜁니다.")
         narratives["macro"] = []
 
-    # 2. Crypto Native 내러티브 생성
-    if crypto_native_keywords:
+    # 2. Crypto 내러티브 생성 (온체인 + 제도권 통합)
+    if crypto_keywords:
         try:
-            logger.info("[InsightNode] Crypto Native 내러티브 생성 중...")
-            crypto_native_prompt = build_crypto_native_narrative_prompt(
-                crypto_native_keywords,
+            logger.info("[InsightNode] Crypto 내러티브 생성 중 (온체인+제도권 통합)...")
+            crypto_prompt = build_crypto_narrative_prompt(
+                crypto_keywords,
                 source_highlights,
-                num_paragraphs=crypto_native_paragraphs
+                num_paragraphs=crypto_paragraphs,
+                economic_events=economic_events
             )
-            crypto_native_response = await llm_client.generate_content_async(
-                prompt=crypto_native_prompt,
+            crypto_response = await llm_client.generate_content_async(
+                prompt=crypto_prompt,
                 response_format="json"
             )
-            narratives["crypto_native"] = parse_narrative_response(crypto_native_response, "Crypto Native")
-            logger.info(f"[InsightNode] Crypto Native 내러티브 {len(narratives['crypto_native'])}개 문단 생성 완료")
+            narratives["crypto"] = parse_narrative_response(crypto_response, "Crypto")
+            logger.info(f"[InsightNode] Crypto 내러티브 {len(narratives['crypto'])}개 문단 생성 완료")
         except Exception as exc:
-            error_msg = f"Crypto Native 내러티브 생성 실패: {exc}"
+            error_msg = f"Crypto 내러티브 생성 실패: {exc}"
             logger.error(f"[InsightNode] {error_msg}", exc_info=True)
             errors.append(error_msg)
-            narratives["crypto_native"] = []
+            narratives["crypto"] = []
     else:
-        logger.warning("[InsightNode] Crypto Native 키워드가 없어 내러티브를 건너뜁니다.")
-        narratives["crypto_native"] = []
+        logger.warning("[InsightNode] Crypto 키워드가 없어 내러티브를 건너뜁니다.")
+        narratives["crypto"] = []
 
-    # 3. Crypto-Macro 내러티브 생성
-    if crypto_macro_keywords:
-        try:
-            logger.info("[InsightNode] Crypto-Macro 내러티브 생성 중...")
-            crypto_macro_prompt = build_crypto_macro_narrative_prompt(
-                crypto_macro_keywords,
-                source_highlights,
-                num_paragraphs=crypto_macro_paragraphs
-            )
-            crypto_macro_response = await llm_client.generate_content_async(
-                prompt=crypto_macro_prompt,
-                response_format="json"
-            )
-            narratives["crypto_macro"] = parse_narrative_response(crypto_macro_response, "Crypto-Macro")
-            logger.info(f"[InsightNode] Crypto-Macro 내러티브 {len(narratives['crypto_macro'])}개 문단 생성 완료")
-        except Exception as exc:
-            error_msg = f"Crypto-Macro 내러티브 생성 실패: {exc}"
-            logger.error(f"[InsightNode] {error_msg}", exc_info=True)
-            errors.append(error_msg)
-            narratives["crypto_macro"] = []
-    else:
-        logger.warning("[InsightNode] Crypto-Macro 키워드가 없어 내러티브를 건너뜁니다.")
-        narratives["crypto_macro"] = []
-
-    # 4. 통합 내러티브 생성
+    # 3. 통합 내러티브 생성 (Macro + Crypto 참조)
     try:
-        logger.info("[InsightNode] 통합 내러티브 생성 중...")
+        logger.info("[InsightNode] 통합 내러티브 생성 중 (Macro + Crypto 참조)...")
         integrated_prompt = build_integrated_narrative_prompt(
             narratives.get("macro", []),
-            narratives.get("crypto_native", []),
-            narratives.get("crypto_macro", []),
+            narratives.get("crypto", []),
             all_keywords,
-            num_paragraphs=integrated_paragraphs
+            num_paragraphs=integrated_paragraphs,
+            economic_events=economic_events
         )
         integrated_response = await llm_client.generate_content_async(
             prompt=integrated_prompt,
@@ -615,7 +599,7 @@ async def _generate_segmented_narratives(
         errors.append(error_msg)
         narratives["integrated"] = []
 
-    # 5. 거래 인사이트 생성 (기존 방식)
+    # 4. 거래 인사이트 생성 (기존 방식)
     try:
         logger.info("[InsightNode] 거래 인사이트 생성 중...")
         insight_prompt = build_insight_prompt(

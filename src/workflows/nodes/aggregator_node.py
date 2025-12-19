@@ -310,15 +310,14 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
             # 키워드 분류 (고정 + 동적)
             categorizer = KeywordCategorizer(dynamic_manager=dynamic_manager)
 
-            # 카테고리별 차등 임계값 로드 (Phase 2)
+            # 카테고리별 차등 임계값 로드 (2-카테고리 시스템)
             category_thresholds = narrative_config.get("category_thresholds")
             if category_thresholds is None:
                 # 하위 호환성: min_category_confidence 사용
                 min_confidence = narrative_config.get("min_category_confidence", 0.5)
                 category_thresholds = {
                     "macro": min_confidence,
-                    "crypto_native": min_confidence,
-                    "crypto_macro": min_confidence
+                    "crypto": min_confidence
                 }
 
             # 멀티 레이블 분류 사용 (중복 허용, 카테고리별 차등 임계값 적용)

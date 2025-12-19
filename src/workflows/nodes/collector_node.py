@@ -47,24 +47,43 @@ async def collector_node(state: AnalysisState) -> AnalysisState:
             "chunk_count": 0,
             "errors": state.get("errors", []) + ["CollectorNode: raw_records가 비어있습니다."]
         }
-    
-    logger.info(f"[CollectorNode] 처리할 레코드 수: {len(raw_records)}개")
-    
+
+    # Economic Calendar 레코드 필터링 (키워드 추출 대상에서 제외, 참고자료로만 사용)
+    filtered_records = [
+        record for record in raw_records
+        if record.get("source") != "economic_calendar"
+    ]
+
+    ec_count = len(raw_records) - len(filtered_records)
+    logger.info(
+        f"[CollectorNode] 처리할 레코드 수: {len(filtered_records)}개 "
+        f"(Economic Calendar {ec_count}개는 참고자료로만 사용)"
+    )
+
+    if not filtered_records:
+        logger.warning("[CollectorNode] 키워드 추출 대상 레코드가 없습니다 (Economic Calendar만 존재).")
+        return {
+            **state,
+            "chunks": [],
+            "chunk_count": 0,
+            "errors": state.get("errors", []) + ["CollectorNode: 키워드 추출 대상 레코드가 없습니다."]
+        }
+
     # 2. 설정에서 청크 크기 확인
     config = state.get("config", {})
     llm_config = config.get("llm", {})
     chunk_size = llm_config.get("chunk_size", 50000)  # 기본값: 50000 토큰
-    
+
     logger.info(f"[CollectorNode] 청크 크기 설정: {chunk_size} 토큰")
-    
-    # 3. Preprocessor를 사용하여 청크 생성
+
+    # 3. Preprocessor를 사용하여 청크 생성 (Economic Calendar 제외된 레코드만 사용)
     try:
         preprocessor = Preprocessor(
             config=PreprocessingConfig(token_encoding="cl100k_base")
         )
-        
+
         chunks = await preprocessor.chunk_messages(
-            records=raw_records,
+            records=filtered_records,
             max_tokens=chunk_size
         )
         

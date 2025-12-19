@@ -53,10 +53,10 @@ def build_json_report(state: AnalysisState) -> Dict[str, Any]:
     # 내러티브 문단 수 계산 (세분화 모드 대응)
     narratives = insights.get("narratives")
     if narratives and isinstance(narratives, dict):
-        # 세분화된 내러티브
+        # 세분화된 내러티브 (2-카테고리: macro, crypto, integrated)
         total_paragraphs = sum(
             len(narratives.get(cat, []))
-            for cat in ["macro", "crypto_native", "crypto_macro", "integrated"]
+            for cat in ["macro", "crypto", "integrated"]
         )
         narrative_info = f"세분화된 내러티브 {total_paragraphs}개 문단"
     else:
@@ -369,7 +369,7 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
     narratives = insights.get("narratives")
 
     if narratives and isinstance(narratives, dict):
-        # 세분화된 내러티브 처리
+        # 세분화된 내러티브 처리 (2-카테고리: macro, crypto, integrated)
         sections = []
 
         # Macro 내러티브
@@ -377,15 +377,10 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
         if macro_narratives:
             sections.append("### Macro 내러티브 요약\n\n" + "\n\n".join(macro_narratives))
 
-        # Crypto Native 내러티브
-        crypto_native_narratives = narratives.get("crypto_native", [])
-        if crypto_native_narratives:
-            sections.append("### Crypto Native 내러티브 요약\n\n" + "\n\n".join(crypto_native_narratives))
-
-        # Crypto-Macro 내러티브
-        crypto_macro_narratives = narratives.get("crypto_macro", [])
-        if crypto_macro_narratives:
-            sections.append("### Crypto-Macro 내러티브 요약\n\n" + "\n\n".join(crypto_macro_narratives))
+        # Crypto 내러티브 (통합: 온체인 + 제도권)
+        crypto_narratives = narratives.get("crypto", [])
+        if crypto_narratives:
+            sections.append("### Crypto 내러티브 요약\n\n" + "\n\n".join(crypto_narratives))
 
         # 통합 내러티브
         integrated_narratives = narratives.get("integrated", [])
@@ -578,12 +573,11 @@ def _build_markdown_quality_section(state: AnalysisState) -> str:
     overall_score = quality_metrics.get("overall_quality_score", 0.0)
     overall_grade = _get_quality_grade(overall_score)
 
-    # 카테고리 분포
+    # 카테고리 분포 (2-카테고리: macro, crypto)
     categorized = quality_metrics.get("categorized_keywords", {})
     total_keywords = quality_metrics.get("total_keywords", 0)
     macro_count = categorized.get("macro", 0)
-    crypto_native_count = categorized.get("crypto_native", 0)
-    crypto_macro_count = categorized.get("crypto_macro", 0)
+    crypto_count = categorized.get("crypto", 0)
 
     # 세부 점수
     balance_score = quality_metrics.get("category_balance_score", 0.0)
@@ -601,7 +595,7 @@ def _build_markdown_quality_section(state: AnalysisState) -> str:
         status_icon = "✅" if generated else "❌"
         narrative_status.append(f"{status_icon} {category.replace('_', ' ').title()}")
 
-    # 섹션 생성
+    # 섹션 생성 (2-카테고리: macro, crypto)
     section_parts = [
         "## 품질 평가 (Phase 3)",
         "",
@@ -611,8 +605,7 @@ def _build_markdown_quality_section(state: AnalysisState) -> str:
         "",
         f"- **총 키워드**: {total_keywords}개",
         f"- **Macro**: {macro_count}개",
-        f"- **Crypto Native**: {crypto_native_count}개",
-        f"- **Crypto-Macro**: {crypto_macro_count}개",
+        f"- **Crypto**: {crypto_count}개",
         f"- **분류 균형 점수**: {balance_score:.1%}",
         "",
         "#### 내러티브 품질",

@@ -1,8 +1,8 @@
 """
 내러티브 및 키워드 품질 평가 시스템 (Phase 3)
 
-- 키워드 분류 품질 평가
-- 내러티브 생성 품질 평가
+- 키워드 분류 품질 평가 (2-카테고리: Macro, Crypto)
+- 내러티브 생성 품질 평가 (3단계: Macro → Crypto → Integrated)
 - 동적 학습 효과 측정
 """
 
@@ -68,27 +68,26 @@ class QualityEvaluator:
         warnings = []
         recommendations = []
 
-        # 1. 키워드 분류 품질 평가
+        # 1. 키워드 분류 품질 평가 (2-카테고리 시스템)
         keyword_counts = {
             "macro": len(categorized_keywords.get("macro", [])),
-            "crypto_native": len(categorized_keywords.get("crypto_native", [])),
-            "crypto_macro": len(categorized_keywords.get("crypto_macro", []))
+            "crypto": len(categorized_keywords.get("crypto", []))
         }
         total_keywords = sum(keyword_counts.values())
 
         # 카테고리 균형도 계산 (엔트로피 기반)
         balance_score = self._calculate_balance_score(keyword_counts)
 
-        # 2. 내러티브 품질 평가
+        # 2. 내러티브 품질 평가 (3단계: macro, crypto, integrated)
         narratives_generated = {}
         narrative_lengths = {}
 
-        for category in ["macro", "crypto_native", "crypto_macro", "integrated"]:
+        for category in ["macro", "crypto", "integrated"]:
             narrative_text = narratives.get(category, "")
             narratives_generated[category] = len(narrative_text) > 0
             narrative_lengths[category] = len(narrative_text)
 
-            # 경고: 내러티브 미생성
+            # 경고: 내러티브 미생성 (integrated 제외)
             if not narratives_generated[category] and category != "integrated":
                 warnings.append(f"{category} 내러티브가 생성되지 않았습니다.")
                 recommendations.append(
@@ -199,8 +198,8 @@ class QualityEvaluator:
         """
         score = 0.0
 
-        # 핵심 3개 카테고리 생성 확인
-        core_categories = ["macro", "crypto_native", "crypto_macro"]
+        # 핵심 2개 카테고리 생성 확인 (macro, crypto)
+        core_categories = ["macro", "crypto"]
         generated_count = sum(1 for cat in core_categories if generated.get(cat, False))
 
         # 생성률 점수 (0.5 가중치)

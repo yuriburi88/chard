@@ -269,20 +269,20 @@ class CollectedItem:
     """
     수집 결과 공통 데이터 모델
 
-    RSS 기사와 텔레그램 메시지를 공통 스키마로 표현하여
+    RSS 기사, 텔레그램 메시지, Economic Calendar를 공통 스키마로 표현하여
     후속 전처리 및 분석 단계에서 일관되게 사용할 수 있도록 합니다.
     """
 
-    source_type: Literal["rss", "telegram"]  # 데이터 출처 유형
-    source_name: str  # 데이터 출처 이름 (RSS 피드 이름 또는 텔레그램 채널 이름)
+    source_type: Literal["rss", "telegram", "economic_calendar"]  # 데이터 출처 유형
+    source_name: str  # 데이터 출처 이름 (RSS 피드 이름, 텔레그램 채널 이름, 또는 "economic_calendar")
     timestamp: datetime  # 데이터 타임스탬프 (UTC)
     text: str  # 본문 텍스트
     metadata: Dict[str, MetadataValue] = field(default_factory=dict)  # 부가 메타데이터 (예: message_id, segment_range_tokens 등)
 
     def __post_init__(self) -> None:
         """데이터 검증 및 정규화"""
-        if self.source_type not in ("rss", "telegram"):
-            raise ValueError("source_type은 'rss' 또는 'telegram'이어야 합니다.")
+        if self.source_type not in ("rss", "telegram", "economic_calendar"):
+            raise ValueError("source_type은 'rss', 'telegram', 또는 'economic_calendar'이어야 합니다.")
         if not self.source_name or not self.source_name.strip():
             raise ValueError("source_name은 필수이며 비어있을 수 없습니다.")
         if not self.text or not self.text.strip():

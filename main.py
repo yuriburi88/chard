@@ -17,6 +17,7 @@ from src.config_manager import ConfigManager, AppConfig, OutputConfig
 from src.async_utils import run_async_main
 from src.collectors.rss_collector import RSSCollector
 from src.collectors.telegram_collector import TelegramCollector
+from src.collectors.economic_calendar_collector import collect_economic_calendar
 from src.collectors.models import Article, TelegramMessage, CollectedItem
 from src.preprocessor import Preprocessor, PreprocessingConfig
 from src.normalizer import DataNormalizer
@@ -380,33 +381,136 @@ async def collect_telegram_data(
         details={"sources_count": len(app_config.telegram_sources), "messages_count": len(telegram_messages)}
     )
     logger.info(f"[텔레그램 수집] 완료: 총 {len(telegram_messages)}개 메시지 수집")
-    
+
     return telegram_messages
+
+
+async def collect_economic_calendar_data(
+    app_config: AppConfig,
+    execution_logger: ExecutionLogger
+) -> List[CollectedItem]:
+    """
+    Economic Calendar 데이터를 수집합니다.
+
+    Args:
+        app_config: 애플리케이션 설정 객체
+        execution_logger: 실행 로그 기록기
+
+    Returns:
+        수집된 경제 지표 이벤트 리스트 (CollectedItem 형식)
+    """
+    logger = logging.getLogger(__name__)
+    collect_start = datetime.now(timezone.utc)
+
+    # Economic Calendar 설정 확인
+    ec_config = app_config.economic_calendar
+
+    if not ec_config.enabled:
+        logger.info("[Economic Calendar] 비활성화 상태, 수집 건너뜀")
+        collect_end = datetime.now(timezone.utc)
+        execution_logger.log_stage(
+            "economic_calendar_collect",
+            collect_start,
+            collect_end,
+            success=True,
+            details={"enabled": False, "events_count": 0}
+        )
+        return []
+
+    days_back = ec_config.days_back
+    days_forward = ec_config.days_forward
+
+    logger.info(
+        f"[Economic Calendar] 데이터 수집 시작 "
+        f"(과거 {days_back}일 + 미래 {days_forward}일)"
+    )
+
+    try:
+        # Economic Calendar 데이터 수집
+        records = await collect_economic_calendar(
+            countries=ec_config.countries,
+            importance=ec_config.importance,
+            days_back=days_back,
+            days_forward=days_forward
+        )
+
+        logger.info(
+            f"[Economic Calendar] 수집 완료: {len(records)}개 이벤트 "
+            f"(과거 {days_back}일 + 미래 {days_forward}일)"
+        )
+
+        # CollectedItem 형식으로 변환
+        collected_items = []
+        for record in records:
+            try:
+                collected_items.append(
+                    CollectedItem(
+                        source_type="economic_calendar",
+                        source_name="Economic Calendar",
+                        timestamp=datetime.fromisoformat(record["timestamp"]),
+                        text=record["text"],
+                        metadata=record.get("meta", {})
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"[Economic Calendar] 레코드 변환 실패: {e}")
+                continue
+
+        collect_end = datetime.now(timezone.utc)
+        execution_logger.log_stage(
+            "economic_calendar_collect",
+            collect_start,
+            collect_end,
+            success=True,
+            details={"enabled": True, "events_count": len(collected_items)}
+        )
+
+        return collected_items
+
+    except Exception as exc:
+        logger.error(f"[Economic Calendar] 수집 실패: {exc}", exc_info=True)
+        collect_end = datetime.now(timezone.utc)
+        execution_logger.log_stage(
+            "economic_calendar_collect",
+            collect_start,
+            collect_end,
+            success=False,
+            details={"error": str(exc)}
+        )
+        execution_logger.log_error(
+            "EconomicCalendarCollectionError",
+            f"Economic Calendar 수집 실패: {str(exc)}",
+            stage="collect",
+            details={"countries": ec_config.get("countries", [])}
+        )
+        return []
 
 
 async def preprocess_data(
     rss_articles: List[Article],
     telegram_messages: List[TelegramMessage],
+    economic_events: List[CollectedItem],
     execution_logger: ExecutionLogger,
     preprocessing_config: Optional[PreprocessingConfig] = None
 ) -> tuple[List[Article], List[CollectedItem]]:
     """
     데이터를 전처리합니다.
-    
+
     Args:
         rss_articles: RSS 기사 리스트
         telegram_messages: 텔레그램 메시지 리스트
+        economic_events: Economic Calendar 이벤트 리스트
         execution_logger: 실행 로그 기록기
         preprocessing_config: 전처리 설정
-    
+
     Returns:
-        (전처리된 RSS 기사 리스트, 전처리된 텔레그램 CollectedItem 리스트)
+        (전처리된 RSS 기사 리스트, 전처리된 CollectedItem 리스트 - telegram + economic)
     """
     logger = logging.getLogger(__name__)
     preprocessed_articles: List[Article] = []
     preprocessed_items: List[CollectedItem] = []
-    
-    if not rss_articles and not telegram_messages:
+
+    if not rss_articles and not telegram_messages and not economic_events:
         logger.warning("[전처리] 수집된 데이터가 없어 전처리를 건너뜁니다.")
         return preprocessed_articles, preprocessed_items
     
@@ -423,15 +527,26 @@ async def preprocess_data(
             f"(필터링: {len(rss_articles) - len(preprocessed_articles)}개)"
         )
     
-    # 텔레그램 메시지는 CollectedItem으로 변환 후 전처리
+    # 텔레그램 메시지와 Economic Calendar 이벤트를 CollectedItem으로 병합 후 전처리
+    combined_items = []
+
     if telegram_messages:
         telegram_items = DataNormalizer.normalize_telegram_messages(telegram_messages)
-        preprocessed_items = await preprocessor.preprocess_collected_items(telegram_items)
+        combined_items.extend(telegram_items)
+        logger.info(f"[전처리] 텔레그램 메시지: {len(telegram_messages)}개 변환")
+
+    if economic_events:
+        combined_items.extend(economic_events)
+        logger.info(f"[전처리] Economic Calendar: {len(economic_events)}개 추가")
+
+    # 병합된 아이템 전처리
+    if combined_items:
+        preprocessed_items = await preprocessor.preprocess_collected_items(combined_items)
         logger.info(
-            f"[전처리] 텔레그램 메시지: {len(telegram_messages)}개 → {len(preprocessed_items)}개 "
-            f"(필터링: {len(telegram_messages) - len(preprocessed_items)}개)"
+            f"[전처리] 통합 아이템: {len(combined_items)}개 → {len(preprocessed_items)}개 "
+            f"(필터링: {len(combined_items) - len(preprocessed_items)}개)"
         )
-    
+
     preprocess_end = datetime.now(timezone.utc)
     execution_logger.log_stage(
         "preprocess",
@@ -442,7 +557,8 @@ async def preprocess_data(
             "rss_input": len(rss_articles),
             "rss_output": len(preprocessed_articles),
             "telegram_input": len(telegram_messages),
-            "telegram_output": len(preprocessed_items)
+            "economic_input": len(economic_events),
+            "combined_output": len(preprocessed_items)
         }
     )
     logger.info("[전처리] 데이터 전처리 완료")
@@ -457,12 +573,12 @@ async def normalize_data(
 ) -> List[CollectedItem]:
     """
     데이터를 정규화합니다.
-    
+
     Args:
         preprocessed_articles: 전처리된 RSS 기사 리스트
-        preprocessed_items: 전처리된 텔레그램 CollectedItem 리스트
+        preprocessed_items: 전처리된 CollectedItem 리스트 (텔레그램 + Economic Calendar)
         execution_logger: 실행 로그 기록기
-    
+
     Returns:
         정규화된 CollectedItem 리스트 (시간순 정렬)
     """
@@ -481,7 +597,7 @@ async def normalize_data(
         article_items = DataNormalizer.normalize_articles(preprocessed_articles)
         normalized_items.extend(article_items)
     
-    # 텔레그램 메시지는 이미 CollectedItem이므로 추가
+    # 텔레그램 메시지와 Economic Calendar 이벤트는 이미 CollectedItem이므로 추가
     if preprocessed_items:
         normalized_items.extend(preprocessed_items)
     
@@ -759,10 +875,12 @@ async def main_async(app_config: AppConfig, log_level: str = "INFO") -> None:
         # 1. 데이터 수집
         rss_articles = await collect_rss_data(app_config, min_timestamp, execution_logger)
         telegram_messages = await collect_telegram_data(app_config, min_timestamp, execution_logger)
-        
+        economic_events = await collect_economic_calendar_data(app_config, execution_logger)
+
         # 모든 소스가 없는 경우 에러 발생
-        if not app_config.rss_sources and not app_config.telegram_sources:
-            error_msg = "수집할 소스가 설정되지 않았습니다. rss_sources 또는 telegram_sources 중 최소 하나는 설정되어야 합니다."
+        ec_enabled = app_config.economic_calendar.enabled
+        if not app_config.rss_sources and not app_config.telegram_sources and not ec_enabled:
+            error_msg = "수집할 소스가 설정되지 않았습니다. rss_sources, telegram_sources, 또는 economic_calendar 중 최소 하나는 설정되어야 합니다."
             logger.error(f"[오류] {error_msg}")
             execution_logger.log_error(
                 "NoSourceError",
@@ -770,17 +888,26 @@ async def main_async(app_config: AppConfig, log_level: str = "INFO") -> None:
                 stage="collect",
                 details={
                     "rss_sources_count": len(app_config.rss_sources),
-                    "telegram_sources_count": len(app_config.telegram_sources)
+                    "telegram_sources_count": len(app_config.telegram_sources),
+                    "economic_calendar_enabled": ec_enabled
                 }
             )
             execution_logger.end()
             raise ValueError(error_msg)
-        
+
+        # 수집 통계 로깅
+        logger.info(
+            f"[데이터 수집 완료] RSS={len(rss_articles)}, "
+            f"Telegram={len(telegram_messages)}, "
+            f"Economic Calendar={len(economic_events)}"
+        )
+
         # 수집 통계 기록
         execution_logger.set_statistics({
             "rss_articles": len(rss_articles),
             "telegram_messages": len(telegram_messages),
-            "total_collected": len(rss_articles) + len(telegram_messages)
+            "economic_events": len(economic_events),
+            "total_collected": len(rss_articles) + len(telegram_messages) + len(economic_events)
         })
         
         # 2. 데이터 전처리
@@ -793,6 +920,7 @@ async def main_async(app_config: AppConfig, log_level: str = "INFO") -> None:
         preprocessed_articles, preprocessed_items = await preprocess_data(
             rss_articles,
             telegram_messages,
+            economic_events,
             execution_logger,
             preprocessing_config=preprocessing_config
         )
