@@ -1,0 +1,21 @@
+# CHARD Development Dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Code Formatter
+black>=23.12.0
+
+# Linter
+ruff>=0.1.9
+
+# Import Sorter (also available via ruff)
+isort>=5.13.0
+
+# Type Checker
+mypy>=1.8.0
+
+# Pre-commit Hooks
+pre-commit>=3.6.0
+
+# Development utilities
+ipython>=8.18.0
+ipdb>=0.13.13
