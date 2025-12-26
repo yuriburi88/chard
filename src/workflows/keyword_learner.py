@@ -9,9 +9,9 @@ LLM 기반 키워드 학습 시스템
 import asyncio
 import json
 import logging
-from typing import Dict, List
 
 from src.workflows.llm_client import GeminiClient
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +30,10 @@ class KeywordLearner:
 
     def learn_keywords(
         self,
-        top_keywords: List[Dict],
+        top_keywords: list[dict],
         top_n: int = 30,
         min_frequency: int = 2,
-    ) -> Dict[str, List[str]]:
+    ) -> dict[str, list[str]]:
         """
         상위 N개 키워드를 LLM으로 분석하여 카테고리별로 분류합니다.
 
@@ -52,7 +52,8 @@ class KeywordLearner:
         """
         # 상위 N개 + 최소 빈도 필터링
         filtered_keywords = [
-            kw for kw in top_keywords[:top_n]
+            kw
+            for kw in top_keywords[:top_n]
             if len(kw.get("sources", [])) >= min_frequency
         ]
 
@@ -61,7 +62,9 @@ class KeywordLearner:
             return {"macro": [], "crypto_native": [], "crypto_macro": []}
 
         # LLM에 전달할 키워드 리스트 생성
-        keyword_terms = [kw.get("term", "") for kw in filtered_keywords if kw.get("term")]
+        keyword_terms = [
+            kw.get("term", "") for kw in filtered_keywords if kw.get("term")
+        ]
 
         if not keyword_terms:
             logger.warning("학습할 키워드가 없습니다. (term이 없음)")
@@ -72,15 +75,17 @@ class KeywordLearner:
         # LLM으로 분류
         try:
             categorized = self._categorize_with_llm(keyword_terms)
-            logger.info(f"키워드 학습 완료: Macro={len(categorized.get('macro', []))}, "
-                       f"Crypto Native={len(categorized.get('crypto_native', []))}, "
-                       f"Crypto-Macro={len(categorized.get('crypto_macro', []))}")
+            logger.info(
+                f"키워드 학습 완료: Macro={len(categorized.get('macro', []))}, "
+                f"Crypto Native={len(categorized.get('crypto_native', []))}, "
+                f"Crypto-Macro={len(categorized.get('crypto_macro', []))}"
+            )
             return categorized
         except Exception as e:
             logger.error(f"키워드 학습 실패: {e}", exc_info=True)
             return {"macro": [], "crypto_native": [], "crypto_macro": []}
 
-    def _categorize_with_llm(self, keywords: List[str]) -> Dict[str, List[str]]:
+    def _categorize_with_llm(self, keywords: list[str]) -> dict[str, list[str]]:
         """
         LLM을 사용하여 키워드를 카테고리별로 분류합니다.
 
@@ -96,12 +101,15 @@ class KeywordLearner:
         try:
             # 이미 실행 중인 이벤트 루프 체크
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 # 이미 실행 중이면 새로운 스레드에서 실행
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(
-                        lambda: asyncio.run(self.llm_client.generate_content_async(prompt))
+                        lambda: asyncio.run(
+                            self.llm_client.generate_content_async(prompt)
+                        )
                     )
                     response = future.result()
             except RuntimeError:
@@ -117,7 +125,7 @@ class KeywordLearner:
 
         return categorized
 
-    def _build_categorization_prompt(self, keywords: List[str]) -> str:
+    def _build_categorization_prompt(self, keywords: list[str]) -> str:
         """
         키워드 분류를 위한 LLM 프롬프트를 생성합니다.
 
@@ -171,7 +179,7 @@ class KeywordLearner:
 """
         return prompt
 
-    def _parse_categorization_response(self, response: str) -> Dict[str, List[str]]:
+    def _parse_categorization_response(self, response: str) -> dict[str, list[str]]:
         """
         LLM 응답을 파싱하여 카테고리별 키워드 딕셔너리로 변환합니다.
 

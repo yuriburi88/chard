@@ -13,10 +13,10 @@ from .embedding_cluster import (
     recalculate_cluster_scores,
 )
 
+
 __all__ = [
     "generate_keyword_embeddings",
     "cluster_keywords_by_embedding",
     "aggregate_clustered_keywords",
     "recalculate_cluster_scores",
 ]
-

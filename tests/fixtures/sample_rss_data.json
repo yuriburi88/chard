@@ -1,0 +1,49 @@
+{
+  "feed": {
+    "title": "Sample Crypto News Feed",
+    "link": "https://example.com/feed",
+    "description": "Sample RSS feed for testing"
+  },
+  "entries": [
+    {
+      "title": "Bitcoin Surges Past $100K as Institutional Adoption Grows",
+      "link": "https://example.com/article/1",
+      "published": "2024-12-25T10:00:00Z",
+      "published_parsed": [2024, 12, 25, 10, 0, 0, 2, 360, 0],
+      "summary": "Bitcoin reached a new all-time high as major institutions continue to accumulate the cryptocurrency.",
+      "author": "John Doe"
+    },
+    {
+      "title": "Ethereum ETF Sees Record Inflows",
+      "link": "https://example.com/article/2",
+      "published": "2024-12-25T09:30:00Z",
+      "published_parsed": [2024, 12, 25, 9, 30, 0, 2, 360, 0],
+      "summary": "The newly launched Ethereum ETF recorded its highest single-day inflows since launch.",
+      "author": "Jane Smith"
+    },
+    {
+      "title": "Federal Reserve Signals Rate Cut in 2025",
+      "link": "https://example.com/article/3",
+      "published": "2024-12-25T08:00:00Z",
+      "published_parsed": [2024, 12, 25, 8, 0, 0, 2, 360, 0],
+      "summary": "The Fed announced potential rate cuts next year, boosting risk asset sentiment.",
+      "author": "Bob Wilson"
+    },
+    {
+      "title": "DeFi Protocol Launches New Yield Farming Strategy",
+      "link": "https://example.com/article/4",
+      "published": "2024-12-24T22:00:00Z",
+      "published_parsed": [2024, 12, 24, 22, 0, 0, 1, 359, 0],
+      "summary": "A popular DeFi protocol introduced innovative yield optimization features.",
+      "author": "Alice Brown"
+    },
+    {
+      "title": "South Korea Announces New Crypto Regulations",
+      "link": "https://example.com/article/5",
+      "published": "2024-12-24T20:00:00Z",
+      "published_parsed": [2024, 12, 24, 20, 0, 0, 1, 359, 0],
+      "summary": "Korean regulators unveiled comprehensive cryptocurrency trading guidelines.",
+      "author": "Kim Min-jun"
+    }
+  ]
+}

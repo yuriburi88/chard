@@ -4,13 +4,15 @@
 .env 파일과 config.yml 파일을 로드하고 검증하는 Config Manager를 제공합니다.
 """
 
-import os
-import yaml
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Literal
-from dataclasses import dataclass, field
-from dotenv import load_dotenv
 import logging
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
+from dotenv import load_dotenv
+
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RSSSourceConfig:
     """RSS 소스 설정"""
+
     name: str
     url: str
     priority: float = 1.0
@@ -29,29 +32,34 @@ class RSSSourceConfig:
 @dataclass
 class TelegramSourceConfig:
     """텔레그램 소스 설정
-    
+
     Bot API와 MTProto 두 방식을 모두 지원합니다.
     - Bot API: auth_method="bot_api", bot_token 필요
     - MTProto: auth_method="mtproto", tg_cred_id 필수 (환경변수에서 자격증명 로드)
-    
+
     자격증명 기반 관리:
     - tg_cred_id가 설정되면 환경변수에서 TG_CRED_<ID>_API_ID 등을 로드
     - 동일한 자격증명(api_id, api_hash, phone)으로 여러 채널에 접근 가능
     - 세션 파일은 자격증명별로 하나만 생성 (동일 자격증명의 여러 채널은 같은 세션 파일 공유)
     - api_id, api_hash, phone_number는 환경변수에서만 로드되며, config.yml에 직접 기입하지 않음
     """
+
     name: str
     channel_id: str
     auth_method: str = "bot_api"  # "bot_api" 또는 "mtproto"
     # Bot API 인증 정보
-    bot_token: Optional[str] = None  # Bot API 토큰 (auth_method="bot_api"일 때 사용)
+    bot_token: str | None = None  # Bot API 토큰 (auth_method="bot_api"일 때 사용)
     # 자격증명 기반 관리 (MTProto)
-    tg_cred_id: Optional[str] = None  # 텔레그램 자격증명 ID (예: "1", "ONE", "MAIN") - 필수, 환경변수에서 자격증명 정보 로드
+    tg_cred_id: str | None = (
+        None  # 텔레그램 자격증명 ID (예: "1", "ONE", "MAIN") - 필수, 환경변수에서 자격증명 정보 로드
+    )
     # MTProto 인증 정보 (환경변수에서 로드된 값, config.yml에 직접 기입하지 않음)
-    api_id: Optional[int] = None  # Telegram API ID (환경변수에서 로드)
-    api_hash: Optional[str] = None  # Telegram API Hash (환경변수에서 로드)
-    phone_number: Optional[str] = None  # 전화번호 (환경변수에서 로드, session_file 사용 시 불필요)
-    session_file: Optional[str] = None  # 세션 파일 경로 (자동 생성 또는 명시)
+    api_id: int | None = None  # Telegram API ID (환경변수에서 로드)
+    api_hash: str | None = None  # Telegram API Hash (환경변수에서 로드)
+    phone_number: str | None = (
+        None  # 전화번호 (환경변수에서 로드, session_file 사용 시 불필요)
+    )
+    session_file: str | None = None  # 세션 파일 경로 (자동 생성 또는 명시)
     timezone: int = 9
     max_messages: int = 100
 
@@ -59,28 +67,33 @@ class TelegramSourceConfig:
 @dataclass
 class LLMConfig:
     """LLM 분석 옵션"""
+
     model: str = "gemini-2.0-flash-exp"
     provider: str = "google"
     max_tokens: int = 4000
     temperature: float = 0.1
     chunk_size: int = 50000  # 청크당 최대 토큰 수 (프롬프트 포함)
-    parallel_concurrency: int = 3  # LangGraph Stage 4 병렬 처리 동시 실행 수 (0이면 무제한)
+    parallel_concurrency: int = (
+        3  # LangGraph Stage 4 병렬 처리 동시 실행 수 (0이면 무제한)
+    )
 
 
 @dataclass
 class NormalizationConfig:
     """키워드 정규화 옵션"""
+
     embedding_threshold: float = 0.85  # DBSCAN 클러스터링 임계값 (코사인 유사도)
     dbscan_min_samples: int = 2
     llm_verification_enabled: bool = True
     llm_verification_top_n: int = 20  # 상위 2N개 키워드 선정 (N=10일 때 20개)
     embedding_provider: str = "google"  # "google" 또는 "keybert"
-    embedding_model: Optional[str] = None  # provider별 모델명
+    embedding_model: str | None = None  # provider별 모델명
 
 
 @dataclass
 class NarrativeConfig:
     """내러티브 세분화 설정"""
+
     enable_segmentation: bool = True  # 내러티브 세분화 활성화
     macro_paragraphs: int = 2  # Macro 내러티브 문단 수
     crypto_native_paragraphs: int = 2  # Crypto Native 내러티브 문단 수
@@ -92,6 +105,7 @@ class NarrativeConfig:
 @dataclass
 class OutputConfig:
     """출력 구성"""
+
     top_keywords_count: int = 10  # 최종 상위 키워드 개수
     summary_paragraphs: int = 4  # 내러티브 요약 문단 수 (세분화 비활성화 시 사용)
     log_level: str = "INFO"
@@ -114,18 +128,22 @@ class CollectionPeriodConfig:
     - mode="days_back", days_back=1 → 11/23 00:00 ~ 현재
     - mode="days_back", days_back=3 → 11/21 00:00 ~ 현재
     """
+
     mode: str = "recent_hours"  # "recent_hours" 또는 "days_back"
-    start_time: Optional[str] = None  # ISO 8601 형식 또는 None (직접 지정 시)
-    end_time: Optional[str] = None  # ISO 8601 형식 또는 None (직접 지정 시)
-    recent_hours: Optional[int] = None  # mode="recent_hours"일 때: 최근 N시간
-    days_back: Optional[int] = None  # mode="days_back"일 때: N일 전 00:00부터
+    start_time: str | None = None  # ISO 8601 형식 또는 None (직접 지정 시)
+    end_time: str | None = None  # ISO 8601 형식 또는 None (직접 지정 시)
+    recent_hours: int | None = None  # mode="recent_hours"일 때: 최근 N시간
+    days_back: int | None = None  # mode="days_back"일 때: N일 전 00:00부터
 
 
 @dataclass
 class EconomicCalendarConfig:
     """Economic Calendar 수집 설정"""
+
     enabled: bool = False  # 수집 활성화 여부
-    countries: List[str] = field(default_factory=lambda: ["united states"])  # 수집 대상 국가
+    countries: list[str] = field(
+        default_factory=lambda: ["united states"]
+    )  # 수집 대상 국가
     importance: str = "high"  # 중요도 필터: high, medium, low, all
     days_back: int = 7  # 과거 며칠 데이터 수집
     days_forward: int = 0  # 미래 며칠 예정 일정 수집
@@ -134,6 +152,7 @@ class EconomicCalendarConfig:
 @dataclass
 class AppConfig:
     """애플리케이션 전체 설정"""
+
     # 환경 변수
     gemini_api_key: str
 
@@ -141,9 +160,11 @@ class AppConfig:
     collection_period: CollectionPeriodConfig
 
     # 데이터 소스
-    rss_sources: List[RSSSourceConfig] = field(default_factory=list)
-    telegram_sources: List[TelegramSourceConfig] = field(default_factory=list)
-    economic_calendar: EconomicCalendarConfig = field(default_factory=EconomicCalendarConfig)
+    rss_sources: list[RSSSourceConfig] = field(default_factory=list)
+    telegram_sources: list[TelegramSourceConfig] = field(default_factory=list)
+    economic_calendar: EconomicCalendarConfig = field(
+        default_factory=EconomicCalendarConfig
+    )
 
     # LLM 설정
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -165,121 +186,139 @@ class AppConfig:
 
 class ConfigManager:
     """설정 파일 로드 및 검증을 담당하는 매니저"""
-    
-    def __init__(self, config_path: str, env_path: Optional[str] = None):
+
+    def __init__(self, config_path: str, env_path: str | None = None):
         """
         ConfigManager 초기화
-        
+
         Args:
             config_path: config.yml 파일 경로
             env_path: .env 파일 경로 (None이면 프로젝트 루트에서 자동 탐색)
         """
         self.config_path = Path(config_path)
         self.env_path = Path(env_path) if env_path else Path.cwd() / ".env"
-        
+
         if not self.config_path.exists():
             raise FileNotFoundError(f"설정 파일을 찾을 수 없습니다: {self.config_path}")
-    
-    def load_env(self) -> Dict[str, str]:
+
+    def load_env(self) -> dict[str, str]:
         """
         .env 파일을 로드합니다.
-        
+
         Returns:
             환경 변수 딕셔너리
         """
         if not self.env_path.exists():
             logger.warning(f".env 파일을 찾을 수 없습니다: {self.env_path}")
             return {}
-        
+
         load_dotenv(dotenv_path=self.env_path)
-        
+
         env_vars = {
             "GEMINI_API_KEY": os.getenv("GEMINI_API_KEY", ""),
         }
-        
+
         # 필수 환경 변수 검증
         if not env_vars["GEMINI_API_KEY"]:
             raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-        
+
         logger.info(f".env 파일 로드 완료: {self.env_path}")
         return env_vars
-    
-    def load_config(self) -> Dict[str, Any]:
+
+    def load_config(self) -> dict[str, Any]:
         """
         config.yml 파일을 로드합니다.
-        
+
         Returns:
             설정 딕셔너리
         """
-        with open(self.config_path, "r", encoding="utf-8") as f:
+        with open(self.config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
-        
+
         if not config:
             raise ValueError("설정 파일이 비어있습니다.")
-        
+
         logger.info(f"설정 파일 로드 완료: {self.config_path}")
         return config
-    
-    def validate_config(self, config: Dict[str, Any]) -> None:
+
+    def validate_config(self, config: dict[str, Any]) -> None:
         """
         설정 파일의 유효성을 검증합니다.
-        
+
         Args:
             config: 검증할 설정 딕셔너리
-            
+
         Raises:
             ValueError: 설정이 유효하지 않은 경우
         """
-        errors: List[str] = []
-        
+        errors: list[str] = []
+
         # 수집 기간 검증
         if "collection_period" in config:
             period = config["collection_period"]
             if "recent_hours" not in period and "start_time" not in period:
-                errors.append("collection_period에 recent_hours 또는 start_time이 필요합니다.")
+                errors.append(
+                    "collection_period에 recent_hours 또는 start_time이 필요합니다."
+                )
             if "recent_hours" in period and period["recent_hours"] <= 0:
                 errors.append("recent_hours는 0보다 커야 합니다.")
-        
+
         # RSS 소스 검증
         if "rss_sources" in config:
             for idx, source in enumerate(config["rss_sources"]):
                 if "name" not in source or "url" not in source:
                     errors.append(f"rss_sources[{idx}]에 name과 url이 필요합니다.")
-                if "url" in source and not source["url"].startswith(("http://", "https://")):
+                if "url" in source and not source["url"].startswith(
+                    ("http://", "https://")
+                ):
                     errors.append(f"rss_sources[{idx}].url이 유효한 URL이 아닙니다.")
-        
+
         # 텔레그램 소스 검증
         if "telegram_sources" in config:
             for idx, source in enumerate(config["telegram_sources"]):
                 if "name" not in source or "channel_id" not in source:
-                    errors.append(f"telegram_sources[{idx}]에 name과 channel_id가 필요합니다.")
-                
+                    errors.append(
+                        f"telegram_sources[{idx}]에 name과 channel_id가 필요합니다."
+                    )
+
                 auth_method = source.get("auth_method", "bot_api")
                 if auth_method == "bot_api":
                     # Bot API 인증 검증
-                    bot_token = source.get("bot_token") or source.get("access_token")  # 하위 호환성
+                    bot_token = source.get("bot_token") or source.get(
+                        "access_token"
+                    )  # 하위 호환성
                     if not bot_token:
-                        errors.append(f"telegram_sources[{idx}]에 bot_token이 필요합니다 (auth_method=bot_api).")
+                        errors.append(
+                            f"telegram_sources[{idx}]에 bot_token이 필요합니다 (auth_method=bot_api)."
+                        )
                 elif auth_method == "mtproto":
                     # MTProto 인증 검증: tg_cred_id 필수
                     tg_cred_id = source.get("tg_cred_id")
                     if not tg_cred_id:
-                        errors.append(f"telegram_sources[{idx}]에 tg_cred_id가 필요합니다 (auth_method=mtproto).")
+                        errors.append(
+                            f"telegram_sources[{idx}]에 tg_cred_id가 필요합니다 (auth_method=mtproto)."
+                        )
                     else:
                         # 환경변수에서 자격증명 확인
                         cred_slug = tg_cred_id.upper().replace("-", "_")
                         env_api_id = os.getenv(f"TG_CRED_{cred_slug}_API_ID")
                         env_api_hash = os.getenv(f"TG_CRED_{cred_slug}_API_HASH")
                         if not env_api_id:
-                            errors.append(f"telegram_sources[{idx}]에 tg_cred_id가 설정되었지만 환경변수 TG_CRED_{cred_slug}_API_ID가 없습니다.")
+                            errors.append(
+                                f"telegram_sources[{idx}]에 tg_cred_id가 설정되었지만 환경변수 TG_CRED_{cred_slug}_API_ID가 없습니다."
+                            )
                         if not env_api_hash:
-                            errors.append(f"telegram_sources[{idx}]에 tg_cred_id가 설정되었지만 환경변수 TG_CRED_{cred_slug}_API_HASH가 없습니다.")
-                    
+                            errors.append(
+                                f"telegram_sources[{idx}]에 tg_cred_id가 설정되었지만 환경변수 TG_CRED_{cred_slug}_API_HASH가 없습니다."
+                            )
+
                     # session_file 검증 (자동 생성되므로 선택사항이지만 명시 가능)
                     # phone_number는 환경변수에서 로드되므로 config.yml에 기입하지 않음
                 else:
-                    errors.append(f"telegram_sources[{idx}].auth_method는 'bot_api' 또는 'mtproto'여야 합니다.")
-        
+                    errors.append(
+                        f"telegram_sources[{idx}].auth_method는 'bot_api' 또는 'mtproto'여야 합니다."
+                    )
+
         # LLM 설정 검증
         if "llm" in config:
             llm = config["llm"]
@@ -289,28 +328,47 @@ class ConfigManager:
                 errors.append("llm.max_tokens는 0보다 커야 합니다.")
             if "temperature" in llm and not (0.0 <= llm["temperature"] <= 2.0):
                 errors.append("llm.temperature는 0.0과 2.0 사이여야 합니다.")
-        
+
         # 정규화 설정 검증
         if "normalization" in config:
             norm = config["normalization"]
-            if "embedding_threshold" in norm and not (0.0 <= norm["embedding_threshold"] <= 1.0):
-                errors.append("normalization.embedding_threshold는 0.0과 1.0 사이여야 합니다.")
+            if "embedding_threshold" in norm and not (
+                0.0 <= norm["embedding_threshold"] <= 1.0
+            ):
+                errors.append(
+                    "normalization.embedding_threshold는 0.0과 1.0 사이여야 합니다."
+                )
             if "llm_verification_top_n" in norm and norm["llm_verification_top_n"] <= 0:
-                errors.append("normalization.llm_verification_top_n은 0보다 커야 합니다.")
-        
+                errors.append(
+                    "normalization.llm_verification_top_n은 0보다 커야 합니다."
+                )
+
         # 전처리 설정 검증
         if "preprocessing" in config:
             preprocessing = config["preprocessing"]
-            if "max_tokens_per_segment" in preprocessing and preprocessing["max_tokens_per_segment"] <= 0:
-                errors.append("preprocessing.max_tokens_per_segment는 0보다 커야 합니다.")
-            if "segment_overlap_tokens" in preprocessing and preprocessing["segment_overlap_tokens"] < 0:
-                errors.append("preprocessing.segment_overlap_tokens는 0 이상이어야 합니다.")
             if (
-                preprocessing.get("segment_overlap_tokens", 0) >= preprocessing.get("max_tokens_per_segment", 4000)
+                "max_tokens_per_segment" in preprocessing
+                and preprocessing["max_tokens_per_segment"] <= 0
+            ):
+                errors.append(
+                    "preprocessing.max_tokens_per_segment는 0보다 커야 합니다."
+                )
+            if (
+                "segment_overlap_tokens" in preprocessing
+                and preprocessing["segment_overlap_tokens"] < 0
+            ):
+                errors.append(
+                    "preprocessing.segment_overlap_tokens는 0 이상이어야 합니다."
+                )
+            if (
+                preprocessing.get("segment_overlap_tokens", 0)
+                >= preprocessing.get("max_tokens_per_segment", 4000)
                 and preprocessing.get("max_tokens_per_segment", 4000) > 0
             ):
-                errors.append("preprocessing.segment_overlap_tokens는 preprocessing.max_tokens_per_segment보다 작아야 합니다.")
-        
+                errors.append(
+                    "preprocessing.segment_overlap_tokens는 preprocessing.max_tokens_per_segment보다 작아야 합니다."
+                )
+
         # 출력 설정 검증
         if "output" in config:
             output = config["output"]
@@ -318,19 +376,21 @@ class ConfigManager:
                 errors.append("output.top_keywords_count는 0보다 커야 합니다.")
             if "summary_paragraphs" in output and output["summary_paragraphs"] <= 0:
                 errors.append("output.summary_paragraphs는 0보다 커야 합니다.")
-        
+
         if errors:
             error_msg = "설정 검증 실패:\n" + "\n".join(f"  - {e}" for e in errors)
             raise ValueError(error_msg)
-    
-    def parse_config(self, config: Dict[str, Any], env_vars: Dict[str, str]) -> AppConfig:
+
+    def parse_config(
+        self, config: dict[str, Any], env_vars: dict[str, str]
+    ) -> AppConfig:
         """
         설정 딕셔너리를 AppConfig 객체로 변환합니다.
-        
+
         Args:
             config: 설정 딕셔너리
             env_vars: 환경 변수 딕셔너리
-            
+
         Returns:
             AppConfig 객체
         """
@@ -339,53 +399,57 @@ class ConfigManager:
         collection_period = CollectionPeriodConfig(
             start_time=period_config.get("start_time"),
             end_time=period_config.get("end_time"),
-            recent_hours=period_config.get("recent_hours")
+            recent_hours=period_config.get("recent_hours"),
         )
-        
+
         # RSS 소스 파싱
         rss_sources = []
         for source in config.get("rss_sources", []):
-            rss_sources.append(RSSSourceConfig(
-                name=source["name"],
-                url=source["url"],
-                priority=source.get("priority", 1.0),
-                timezone=source.get("timezone", 9),
-                max_articles=source.get("max_articles", 50),
-                hours_back=source.get("hours_back", 24)
-            ))
-        
+            rss_sources.append(
+                RSSSourceConfig(
+                    name=source["name"],
+                    url=source["url"],
+                    priority=source.get("priority", 1.0),
+                    timezone=source.get("timezone", 9),
+                    max_articles=source.get("max_articles", 50),
+                    hours_back=source.get("hours_back", 24),
+                )
+            )
+
         # 텔레그램 소스 파싱
         telegram_sources = []
         for source in config.get("telegram_sources", []):
             # 하위 호환성: access_token이 있으면 bot_token으로 변환
             bot_token = source.get("bot_token") or source.get("access_token")
-            
+
             # 자격증명 기반 관리: tg_cred_id가 필수이며 환경변수에서 자격증명 정보 로드
             tg_cred_id = source.get("tg_cred_id")
             session_file = source.get("session_file")
-            
+
             # api_id, api_hash, phone_number는 환경변수에서만 로드 (config.yml에 직접 기입하지 않음)
             api_id = None
             api_hash = None
             phone_number = None
-            
+
             if tg_cred_id:
                 # 환경변수에서 자격증명 정보 로드
                 cred_slug = tg_cred_id.upper().replace("-", "_")
                 env_api_id = os.getenv(f"TG_CRED_{cred_slug}_API_ID")
                 env_api_hash = os.getenv(f"TG_CRED_{cred_slug}_API_HASH")
                 env_phone = os.getenv(f"TG_CRED_{cred_slug}_PHONE")
-                
+
                 if env_api_id:
                     try:
                         api_id = int(env_api_id)
                     except ValueError:
-                        logger.warning(f"TG_CRED_{cred_slug}_API_ID가 유효한 정수가 아닙니다: {env_api_id}")
+                        logger.warning(
+                            f"TG_CRED_{cred_slug}_API_ID가 유효한 정수가 아닙니다: {env_api_id}"
+                        )
                 if env_api_hash:
                     api_hash = env_api_hash
                 if env_phone:
                     phone_number = env_phone
-                
+
                 # 세션 파일이 명시되지 않았으면 자격증명 기반으로 생성
                 if not session_file:
                     session_file = f"secrets/telegram_sessions/tg_cred_{tg_cred_id.lower()}.session"
@@ -393,8 +457,10 @@ class ConfigManager:
                 # tg_cred_id가 없으면 MTProto 사용 불가 (Bot API는 문제없음)
                 auth_method = source.get("auth_method", "bot_api")
                 if auth_method == "mtproto":
-                    logger.warning(f"telegram_sources[{len(telegram_sources)}]에 tg_cred_id가 없습니다. MTProto를 사용하려면 tg_cred_id가 필요합니다.")
-            
+                    logger.warning(
+                        f"telegram_sources[{len(telegram_sources)}]에 tg_cred_id가 없습니다. MTProto를 사용하려면 tg_cred_id가 필요합니다."
+                    )
+
             # session_file 경로 처리: 상대 경로를 절대 경로로 변환
             if session_file:
                 session_path = Path(session_file)
@@ -402,25 +468,29 @@ class ConfigManager:
                     # 상대 경로인 경우 config.yml 위치 기준으로 절대 경로 변환
                     project_root = self.config_path.parent.resolve()
                     session_file = str((project_root / session_path).resolve())
-                    logger.debug(f"세션 파일 경로 변환: {source.get('session_file')} → {session_file}")
+                    logger.debug(
+                        f"세션 파일 경로 변환: {source.get('session_file')} → {session_file}"
+                    )
                 else:
                     # 절대 경로인 경우 그대로 사용
                     session_file = str(session_path.resolve())
-            
-            telegram_sources.append(TelegramSourceConfig(
-                name=source["name"],
-                channel_id=source["channel_id"],
-                auth_method=source.get("auth_method", "bot_api"),
-                bot_token=bot_token,
-                tg_cred_id=tg_cred_id,
-                api_id=api_id,
-                api_hash=api_hash,
-                phone_number=phone_number,
-                session_file=session_file,
-                timezone=source.get("timezone", 9),
-                max_messages=source.get("max_messages", 100)
-            ))
-        
+
+            telegram_sources.append(
+                TelegramSourceConfig(
+                    name=source["name"],
+                    channel_id=source["channel_id"],
+                    auth_method=source.get("auth_method", "bot_api"),
+                    bot_token=bot_token,
+                    tg_cred_id=tg_cred_id,
+                    api_id=api_id,
+                    api_hash=api_hash,
+                    phone_number=phone_number,
+                    session_file=session_file,
+                    timezone=source.get("timezone", 9),
+                    max_messages=source.get("max_messages", 100),
+                )
+            )
+
         # LLM 설정 파싱
         llm_config = config.get("llm", {})
         llm = LLMConfig(
@@ -431,7 +501,7 @@ class ConfigManager:
             chunk_size=llm_config.get("chunk_size", 50000),
             parallel_concurrency=llm_config.get("parallel_concurrency", 3),
         )
-        
+
         # 정규화 설정 파싱
         norm_config = config.get("normalization", {})
         normalization = NormalizationConfig(
@@ -440,7 +510,7 @@ class ConfigManager:
             llm_verification_enabled=norm_config.get("llm_verification_enabled", True),
             llm_verification_top_n=norm_config.get("llm_verification_top_n", 20),
             embedding_provider=norm_config.get("embedding_provider", "google"),
-            embedding_model=norm_config.get("embedding_model")
+            embedding_model=norm_config.get("embedding_model"),
         )
 
         # 내러티브 설정 파싱
@@ -448,10 +518,14 @@ class ConfigManager:
         narrative = NarrativeConfig(
             enable_segmentation=narrative_config.get("enable_segmentation", True),
             macro_paragraphs=narrative_config.get("macro_paragraphs", 2),
-            crypto_native_paragraphs=narrative_config.get("crypto_native_paragraphs", 2),
+            crypto_native_paragraphs=narrative_config.get(
+                "crypto_native_paragraphs", 2
+            ),
             crypto_macro_paragraphs=narrative_config.get("crypto_macro_paragraphs", 2),
             integrated_paragraphs=narrative_config.get("integrated_paragraphs", 3),
-            min_category_confidence=narrative_config.get("min_category_confidence", 0.5)
+            min_category_confidence=narrative_config.get(
+                "min_category_confidence", 0.5
+            ),
         )
 
         # 출력 설정 파싱
@@ -460,16 +534,20 @@ class ConfigManager:
             top_keywords_count=output_config.get("top_keywords_count", 10),
             summary_paragraphs=output_config.get("summary_paragraphs", 4),
             log_level=output_config.get("log_level", "INFO"),
-            log_filename_strategy=output_config.get("log_filename_strategy", "timestamp"),
+            log_filename_strategy=output_config.get(
+                "log_filename_strategy", "timestamp"
+            ),
             log_fixed_window_days=output_config.get("log_fixed_window_days", 10),
             display_timezone=output_config.get("display_timezone", 9),
-            output_dir=output_config.get("output_dir", "output")
+            output_dir=output_config.get("output_dir", "output"),
         )
 
         # 전처리 설정 파싱
         preprocessing_config = config.get("preprocessing", {})
         split_long_messages = preprocessing_config.get("split_long_messages", True)
-        max_tokens_per_segment = preprocessing_config.get("max_tokens_per_segment", 4000)
+        max_tokens_per_segment = preprocessing_config.get(
+            "max_tokens_per_segment", 4000
+        )
         segment_overlap_tokens = preprocessing_config.get("segment_overlap_tokens", 200)
 
         # Economic Calendar 설정 파싱
@@ -479,7 +557,7 @@ class ConfigManager:
             countries=ec_config.get("countries", ["united states"]),
             importance=ec_config.get("importance", "high"),
             days_back=ec_config.get("days_back", 7),
-            days_forward=ec_config.get("days_forward", 0)
+            days_forward=ec_config.get("days_forward", 0),
         )
 
         return AppConfig(
@@ -494,39 +572,38 @@ class ConfigManager:
             output=output,
             split_long_messages=split_long_messages,
             max_tokens_per_segment=max_tokens_per_segment,
-            segment_overlap_tokens=segment_overlap_tokens
+            segment_overlap_tokens=segment_overlap_tokens,
         )
-    
+
     def load(self) -> AppConfig:
         """
         .env 파일과 config.yml 파일을 로드하고 검증하여 AppConfig를 반환합니다.
-        
+
         Returns:
             검증된 AppConfig 객체
-            
+
         Raises:
             FileNotFoundError: 설정 파일을 찾을 수 없는 경우
             ValueError: 설정이 유효하지 않은 경우
         """
         logger.info("설정 파일 로드 시작...")
-        
+
         # 환경 변수 로드
         env_vars = self.load_env()
-        
+
         # 설정 파일 로드
         config = self.load_config()
-        
+
         # 설정 검증
         self.validate_config(config)
-        
+
         # AppConfig 객체 생성
         app_config = self.parse_config(config, env_vars)
-        
+
         logger.info("설정 파일 로드 완료")
         logger.debug(f"RSS 소스 개수: {len(app_config.rss_sources)}")
         logger.debug(f"텔레그램 소스 개수: {len(app_config.telegram_sources)}")
         logger.debug(f"LLM 모델: {app_config.llm.model}")
         logger.debug(f"최종 키워드 개수: {app_config.output.top_keywords_count}")
-        
-        return app_config
 
+        return app_config

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, MutableMapping, Sequence, Tuple
+from collections.abc import MutableMapping, Sequence
+from typing import Any
 
-from src.workflows.state import AnalysisState
+from src.workflows.llm_client import GeminiClient
 from src.workflows.normalization import (
     aggregate_clustered_keywords,
     cluster_keywords_by_embedding,
@@ -22,9 +23,13 @@ from src.workflows.normalization.embedding_cluster import (
     DEFAULT_GEMINI_TASK_TYPE,
     DEFAULT_OPENAI_EMBEDDING_MODEL,
 )
-from src.workflows.llm_client import GeminiClient
-from src.workflows.prompts import build_synonym_verification_prompt, parse_json_from_llm_response
 from src.workflows.normalization.llm_verifier import merge_llm_groups_with_keywords
+from src.workflows.prompts import (
+    build_synonym_verification_prompt,
+    parse_json_from_llm_response,
+)
+from src.workflows.state import AnalysisState
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +55,9 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
 
     extracted_keywords = state.get("extracted_keywords", [])
     if not extracted_keywords:
-        warning_msg = "AggregatorNode: 입력 키워드가 비어 있어 스코어 통합을 수행할 수 없습니다."
+        warning_msg = (
+            "AggregatorNode: 입력 키워드가 비어 있어 스코어 통합을 수행할 수 없습니다."
+        )
 
         logger.warning("[AggregatorNode] %s", warning_msg)
 
@@ -72,7 +79,7 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
     normalization_config = config.get("normalization", {})
     output_config = config.get("output", {})
 
-    errors: List[str] = list(state.get("errors", []))
+    errors: list[str] = list(state.get("errors", []))
 
     settings = _build_normalization_settings(normalization_config, output_config)
 
@@ -81,7 +88,7 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
         json.dumps(settings.__dict__, ensure_ascii=False),
     )
 
-    extracted_keyword_copies: List[MutableMapping[str, Any]] = [
+    extracted_keyword_copies: list[MutableMapping[str, Any]] = [
         dict(keyword) for keyword in extracted_keywords
     ]
 
@@ -187,7 +194,7 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
     )
 
     final_keywords = preliminary_top_keywords
-    llm_verification_result: Dict[str, Any] | None = None
+    llm_verification_result: dict[str, Any] | None = None
     llm_used = False
 
     if settings.llm_verification_enabled and candidate_keywords:
@@ -243,8 +250,8 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
 
     if enable_segmentation and final_keywords:
         try:
-            from src.workflows.keyword_categories import KeywordCategorizer
             from src.workflows.dynamic_keywords import DynamicKeywordManager
+            from src.workflows.keyword_categories import KeywordCategorizer
             from src.workflows.keyword_learner import KeywordLearner
 
             # 동적 키워드 학습 설정 로드
@@ -260,8 +267,7 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
             if dynamic_enabled:
                 try:
                     dynamic_manager = DynamicKeywordManager(
-                        cache_file=cache_file,
-                        ttl_hours=ttl_hours
+                        cache_file=cache_file, ttl_hours=ttl_hours
                     )
 
                     # LLM 클라이언트 생성하여 키워드 학습
@@ -272,16 +278,14 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
                         max_tokens = llm_config.get("max_tokens", 8000)
 
                         gemini_client = GeminiClient(
-                            model=model,
-                            temperature=temperature,
-                            max_tokens=max_tokens
+                            model=model, temperature=temperature, max_tokens=max_tokens
                         )
 
                         learner = KeywordLearner(gemini_client)
                         learned_keywords = learner.learn_keywords(
                             final_keywords,
                             top_n=learning_top_n,
-                            min_frequency=min_frequency
+                            min_frequency=min_frequency,
                         )
 
                         # 학습한 키워드를 캐시에 업데이트
@@ -292,18 +296,17 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
                                 "Macro=%d, Crypto Native=%d, Crypto-Macro=%d",
                                 len(learned_keywords.get("macro", [])),
                                 len(learned_keywords.get("crypto_native", [])),
-                                len(learned_keywords.get("crypto_macro", []))
+                                len(learned_keywords.get("crypto_macro", [])),
                             )
                     except Exception as learning_exc:  # noqa: BLE001
                         logger.warning(
-                            "[AggregatorNode] 키워드 학습 실패: %s",
-                            learning_exc
+                            "[AggregatorNode] 키워드 학습 실패: %s", learning_exc
                         )
 
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "[AggregatorNode] 동적 키워드 학습 실패 (고정 키워드만 사용): %s",
-                        exc
+                        exc,
                     )
                     dynamic_manager = None
 
@@ -317,19 +320,18 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
                 min_confidence = narrative_config.get("min_category_confidence", 0.5)
                 category_thresholds = {
                     "macro": min_confidence,
-                    "crypto": min_confidence
+                    "crypto": min_confidence,
                 }
 
             # 멀티 레이블 분류 사용 (중복 허용, 카테고리별 차등 임계값 적용)
             categorized_keywords = categorizer.categorize_keywords_multilabel(
-                final_keywords,
-                category_thresholds=category_thresholds
+                final_keywords, category_thresholds=category_thresholds
             )
 
             category_summary = categorizer.get_category_summary(categorized_keywords)
             logger.info(
                 "[AggregatorNode] 키워드 카테고리 분류 완료 (멀티 레이블): %s",
-                json.dumps(category_summary, ensure_ascii=False)
+                json.dumps(category_summary, ensure_ascii=False),
             )
 
             scoring_summary["categorized_keywords"] = category_summary
@@ -342,7 +344,7 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
         logger.info(
             "[AggregatorNode] 키워드 카테고리 분류 건너뜀 (enable_segmentation=%s, keywords=%d)",
             enable_segmentation,
-            len(final_keywords)
+            len(final_keywords),
         )
 
     return {
@@ -380,8 +382,8 @@ class _NormalizationSettings:
         evidence_weight: float,
         candidate_limit: int,
         top_keywords_count: int,
-    llm_verification_enabled: bool,
-    llm_max_variants: int,
+        llm_verification_enabled: bool,
+        llm_max_variants: int,
     ) -> None:
         self.similarity_threshold = similarity_threshold
         self.min_cluster_size = min_cluster_size
@@ -402,8 +404,8 @@ class _NormalizationSettings:
 
 
 def _build_normalization_settings(
-    normalization_config: Dict[str, Any],
-    output_config: Dict[str, Any],
+    normalization_config: dict[str, Any],
+    output_config: dict[str, Any],
 ) -> _NormalizationSettings:
     """
     설정 딕셔너리를 AggregatorNode에서 사용하기 쉬운 형태로 변환합니다.
@@ -419,13 +421,21 @@ def _build_normalization_settings(
     min_cluster_size = int(normalization_config.get("dbscan_min_samples", 1))
 
     provider_value = normalization_config.get("embedding_provider", "google")
-    provider, api_key = _resolve_embedding_provider(provider_value, normalization_config)
+    provider, api_key = _resolve_embedding_provider(
+        provider_value, normalization_config
+    )
 
     if provider == "gemini":
-        embedding_model = normalization_config.get("embedding_model", DEFAULT_GEMINI_EMBEDDING_MODEL)
-        embedding_task_type = normalization_config.get("embedding_task_type", DEFAULT_GEMINI_TASK_TYPE)
+        embedding_model = normalization_config.get(
+            "embedding_model", DEFAULT_GEMINI_EMBEDDING_MODEL
+        )
+        embedding_task_type = normalization_config.get(
+            "embedding_task_type", DEFAULT_GEMINI_TASK_TYPE
+        )
     elif provider == "openai":
-        embedding_model = normalization_config.get("embedding_model", DEFAULT_OPENAI_EMBEDDING_MODEL)
+        embedding_model = normalization_config.get(
+            "embedding_model", DEFAULT_OPENAI_EMBEDDING_MODEL
+        )
         embedding_task_type = normalization_config.get("embedding_task_type")
     else:
         embedding_model = normalization_config.get("embedding_model", "keybert")
@@ -452,7 +462,9 @@ def _build_normalization_settings(
         else max(top_keywords_count * candidate_multiplier, top_keywords_count)
     )
 
-    llm_verification_enabled = bool(normalization_config.get("llm_verification_enabled", True))
+    llm_verification_enabled = bool(
+        normalization_config.get("llm_verification_enabled", True)
+    )
     llm_max_variants = int(normalization_config.get("llm_verification_max_variants", 8))
 
     return _NormalizationSettings(
@@ -477,8 +489,8 @@ def _build_normalization_settings(
 
 def _resolve_embedding_provider(
     provider_value: str,
-    normalization_config: Dict[str, Any],
-) -> Tuple[str, str | None]:
+    normalization_config: dict[str, Any],
+) -> tuple[str, str | None]:
     """
     임베딩 공급자 값을 normalizer가 사용 가능한 값으로 변환합니다.
 
@@ -498,10 +510,9 @@ def _resolve_embedding_provider(
         return "gemini", normalization_config.get("embedding_api_key")
 
     if provider_lower in {"openai"}:
-        api_key = (
-            normalization_config.get("openai_api_key")
-            or normalization_config.get("embedding_api_key")
-        )
+        api_key = normalization_config.get(
+            "openai_api_key"
+        ) or normalization_config.get("embedding_api_key")
         return "openai", api_key
 
     if provider_lower in {"keybert", "local"}:
@@ -544,7 +555,7 @@ async def _apply_llm_verification(
     candidate_keywords: Sequence[MutableMapping[str, Any]],
     settings: _NormalizationSettings,
     llm_config: MutableMapping[str, Any],
-) -> Tuple[List[MutableMapping[str, Any]], Dict[str, Any]]:
+) -> tuple[list[MutableMapping[str, Any]], dict[str, Any]]:
     """
     Gemini를 호출해 동의어 검증을 수행하고 결과를 병합합니다.
 
@@ -596,8 +607,7 @@ async def _apply_llm_verification(
 
     # 공통 JSON 파싱 함수 사용 (코드 블록 자동 처리)
     llm_result = parse_json_from_llm_response(
-        response_text,
-        context="AggregatorNode LLM 동의어 검증 응답"
+        response_text, context="AggregatorNode LLM 동의어 검증 응답"
     )
 
     merged_keywords = merge_llm_groups_with_keywords(
@@ -620,7 +630,7 @@ def _select_top_keywords(
     *,
     limit: int,
     include_ties: bool,
-) -> List[MutableMapping[str, Any]]:
+) -> list[MutableMapping[str, Any]]:
     """
     점수 기반으로 상위 키워드를 선정하고 순위를 부여합니다.
 
@@ -647,7 +657,7 @@ def _select_top_keywords(
         reverse=True,
     )
 
-    ranked_keywords: List[MutableMapping[str, Any]] = []
+    ranked_keywords: list[MutableMapping[str, Any]] = []
 
     last_score: float | None = None
     last_rank = 0
@@ -674,11 +684,7 @@ def _select_top_keywords(
     cutoff_rank = base_selection[-1]["rank"]
 
     tie_extension = [
-        keyword
-        for keyword in ranked_keywords[limit:]
-        if keyword["rank"] == cutoff_rank
+        keyword for keyword in ranked_keywords[limit:] if keyword["rank"] == cutoff_rank
     ]
 
     return base_selection + tie_extension
-
-

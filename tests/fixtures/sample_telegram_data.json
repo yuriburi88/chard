@@ -1,0 +1,65 @@
+{
+  "channel": {
+    "id": -1001234567890,
+    "title": "Crypto News Channel",
+    "username": "cryptonews_test"
+  },
+  "messages": [
+    {
+      "id": 1001,
+      "date": "2024-12-25T11:00:00Z",
+      "text": "Breaking: Bitcoin breaks $100K! Institutional buying pressure continues as ETF inflows reach new highs.",
+      "views": 15000,
+      "forwards": 500
+    },
+    {
+      "id": 1002,
+      "date": "2024-12-25T10:30:00Z",
+      "text": "Ethereum 2.0 staking rewards update: Current APY at 4.2%. Network participation at all-time high.",
+      "views": 12000,
+      "forwards": 350
+    },
+    {
+      "id": 1003,
+      "date": "2024-12-25T09:00:00Z",
+      "text": "Market Analysis: Altcoin season indicators showing bullish signals. Watch for SOL, AVAX, and MATIC breakouts.",
+      "views": 18000,
+      "forwards": 800
+    },
+    {
+      "id": 1004,
+      "date": "2024-12-24T23:00:00Z",
+      "text": "US Treasury yields dropping as Fed signals dovish stance. Risk-on sentiment returning to markets.",
+      "views": 9000,
+      "forwards": 200
+    },
+    {
+      "id": 1005,
+      "date": "2024-12-24T21:00:00Z",
+      "text": "New DeFi protocol alert: Liquid staking derivatives gaining traction. TVL up 50% this week.",
+      "views": 7500,
+      "forwards": 150
+    },
+    {
+      "id": 1006,
+      "date": "2024-12-24T19:00:00Z",
+      "text": "On-chain data: Whale accumulation pattern detected for BTC. Large wallets added 50K BTC in past 7 days.",
+      "views": 22000,
+      "forwards": 1200
+    },
+    {
+      "id": 1007,
+      "date": "2024-12-24T17:00:00Z",
+      "text": "Regulatory news: EU MiCA framework implementation begins Q1 2025. Exchanges preparing for compliance.",
+      "views": 11000,
+      "forwards": 400
+    },
+    {
+      "id": 1008,
+      "date": "2024-12-24T15:00:00Z",
+      "text": "Layer 2 update: Arbitrum and Optimism processing record transactions. Gas fees remain low despite high activity.",
+      "views": 8500,
+      "forwards": 280
+    }
+  ]
+}

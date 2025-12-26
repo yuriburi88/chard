@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from typing import List, Mapping, Sequence
 
 from src.workflows.llm_client import GeminiClient
 from src.workflows.prompts import (
@@ -19,6 +19,7 @@ from src.workflows.prompts import (
     prepare_insight_prompt_inputs,
 )
 from src.workflows.state import AnalysisState
+
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,9 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
     )
 
     config_obj = state.get("config", {})
-    config_mapping: Mapping[str, object] = config_obj if isinstance(config_obj, Mapping) else {}
+    config_mapping: Mapping[str, object] = (
+        config_obj if isinstance(config_obj, Mapping) else {}
+    )
 
     # 내러티브 세분화 설정 확인
     narrative_config = config_mapping.get("narrative", {})
@@ -90,7 +93,10 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
 
     enable_segmentation = narrative_config.get("enable_segmentation", True)
 
-    logger.info("[InsightNode] 내러티브 세분화 모드: %s", "활성화" if enable_segmentation else "비활성화")
+    logger.info(
+        "[InsightNode] 내러티브 세분화 모드: %s",
+        "활성화" if enable_segmentation else "비활성화",
+    )
 
     try:
         settings = _resolve_insight_settings(config_mapping)
@@ -110,7 +116,7 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
         json.dumps(asdict(settings), ensure_ascii=False),
     )
 
-    errors: List[str] = list(state.get("errors", []))
+    errors: list[str] = list(state.get("errors", []))
 
     # ID 매핑 가져오기 (evidence_ids를 원본 텍스트로 복원하기 위해)
     id_mapping = state.get("id_mapping")
@@ -120,7 +126,9 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
         categorized_keywords = state.get("categorized_keywords", {})
 
         if not categorized_keywords:
-            logger.warning("[InsightNode] categorized_keywords가 비어있어 세분화를 건너뜁니다.")
+            logger.warning(
+                "[InsightNode] categorized_keywords가 비어있어 세분화를 건너뜁니다."
+            )
             enable_segmentation = False
         else:
             try:
@@ -130,7 +138,7 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
                     narrative_config=narrative_config,
                     categorized_keywords=categorized_keywords,
                     raw_records=raw_records,
-                    errors=errors
+                    errors=errors,
                 )
 
                 logger.info("[InsightNode] 세분화된 내러티브 생성 완료")
@@ -139,19 +147,20 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
                 quality_metrics_dict = None
                 try:
                     from pathlib import Path
+
                     from src.workflows.quality_metrics import QualityEvaluator
 
                     evaluator = QualityEvaluator()
 
                     # 동적 키워드 캐시 로드
-                    dynamic_cache_file = narrative_config.get("dynamic_keywords", {}).get(
-                        "cache_file", "dynamic_keywords_cache.json"
-                    )
+                    dynamic_cache_file = narrative_config.get(
+                        "dynamic_keywords", {}
+                    ).get("cache_file", "dynamic_keywords_cache.json")
                     dynamic_cache = {}
                     try:
                         cache_path = Path(dynamic_cache_file)
                         if cache_path.exists():
-                            with open(cache_path, "r", encoding="utf-8") as f:
+                            with open(cache_path, encoding="utf-8") as f:
                                 dynamic_cache = json.load(f)
                     except Exception:
                         dynamic_cache = {}
@@ -162,14 +171,16 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
                     narratives = {
                         "macro": "\n\n".join(narratives_data.get("macro", [])),
                         "crypto": "\n\n".join(narratives_data.get("crypto", [])),
-                        "integrated": "\n\n".join(narratives_data.get("integrated", []))
+                        "integrated": "\n\n".join(
+                            narratives_data.get("integrated", [])
+                        ),
                     }
 
                     # 품질 평가 실행
                     quality_metrics = evaluator.evaluate(
                         categorized_keywords=categorized_keywords,
                         narratives=narratives,
-                        dynamic_keywords_cache=dynamic_cache
+                        dynamic_keywords_cache=dynamic_cache,
                     )
 
                     # 품질 리포트 로깅
@@ -185,7 +196,9 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
                     quality_metrics_dict = asdict(quality_metrics)
 
                 except Exception as eval_exc:
-                    logger.warning(f"[InsightNode] 품질 평가 실패: {eval_exc}", exc_info=True)
+                    logger.warning(
+                        f"[InsightNode] 품질 평가 실패: {eval_exc}", exc_info=True
+                    )
 
                 return {
                     **state,
@@ -337,6 +350,7 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
     quality_metrics_dict = None
     try:
         from pathlib import Path
+
         from src.workflows.quality_metrics import QualityEvaluator
 
         evaluator = QualityEvaluator()
@@ -349,7 +363,7 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
         try:
             cache_path = Path(dynamic_cache_file)
             if cache_path.exists():
-                with open(cache_path, "r", encoding="utf-8") as f:
+                with open(cache_path, encoding="utf-8") as f:
                     dynamic_cache = json.load(f)
         except Exception:
             dynamic_cache = {}
@@ -359,14 +373,14 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
         narratives = {
             "macro": "",
             "crypto": "",
-            "integrated": "\n\n".join(insights.get("narrative_summary", []))
+            "integrated": "\n\n".join(insights.get("narrative_summary", [])),
         }
 
         # 품질 평가 실행
         quality_metrics = evaluator.evaluate(
             categorized_keywords=categorized_keywords,
             narratives=narratives,
-            dynamic_keywords_cache=dynamic_cache
+            dynamic_keywords_cache=dynamic_cache,
         )
 
         # 품질 리포트 로깅
@@ -409,15 +423,25 @@ def _resolve_insight_settings(config: Mapping[str, object]) -> _InsightSettings:
     llm_config_raw = config.get("llm", {})
     output_config_raw = config.get("output", {})
 
-    llm_config: Mapping[str, object] = llm_config_raw if isinstance(llm_config_raw, Mapping) else {}
-    output_config: Mapping[str, object] = output_config_raw if isinstance(output_config_raw, Mapping) else {}
+    llm_config: Mapping[str, object] = (
+        llm_config_raw if isinstance(llm_config_raw, Mapping) else {}
+    )
+    output_config: Mapping[str, object] = (
+        output_config_raw if isinstance(output_config_raw, Mapping) else {}
+    )
 
-    model = str(llm_config.get("insight_model", llm_config.get("model", "gemini-2.0-flash-exp"))).strip()
+    model = str(
+        llm_config.get("insight_model", llm_config.get("model", "gemini-2.0-flash-exp"))
+    ).strip()
     if not model:
         raise ValueError("InsightNode: 사용할 LLM 모델을 찾을 수 없습니다.")
 
-    temperature = float(llm_config.get("insight_temperature", llm_config.get("temperature", 0.1) or 0.1))
-    max_tokens = int(llm_config.get("insight_max_tokens", llm_config.get("max_tokens", 4000) or 4000))
+    temperature = float(
+        llm_config.get("insight_temperature", llm_config.get("temperature", 0.1) or 0.1)
+    )
+    max_tokens = int(
+        llm_config.get("insight_max_tokens", llm_config.get("max_tokens", 4000) or 4000)
+    )
 
     summary_paragraphs = int(output_config.get("summary_paragraphs", 4) or 4)
     highlight_limit = int(output_config.get("key_source_limit", 5) or 5)
@@ -444,8 +468,8 @@ async def _generate_segmented_narratives(
     settings: _InsightSettings,
     narrative_config: Mapping[str, object],
     categorized_keywords: Mapping[str, Sequence],
-    raw_records: List,
-    errors: List[str]
+    raw_records: list,
+    errors: list[str],
 ) -> dict:
     """
     세분화된 내러티브를 생성합니다 (Macro/Crypto/Integrated - 3단계).
@@ -462,12 +486,12 @@ async def _generate_segmented_narratives(
         세분화된 인사이트 딕셔너리
     """
     from src.workflows.prompts import (
-        build_macro_narrative_prompt,
         build_crypto_narrative_prompt,
-        build_integrated_narrative_prompt,
         build_insight_prompt,
-        parse_narrative_response,
+        build_integrated_narrative_prompt,
+        build_macro_narrative_prompt,
         parse_insight_response,
+        parse_narrative_response,
         prepare_insight_prompt_inputs,
     )
 
@@ -485,14 +509,18 @@ async def _generate_segmented_narratives(
     logger.info(
         "[InsightNode] 카테고리별 키워드 수: Macro=%d, Crypto=%d",
         len(macro_keywords),
-        len(crypto_keywords)
+        len(crypto_keywords),
     )
 
     # Economic Calendar 이벤트 필터링
     # 주의: DataNormalizer.to_dict_format()에서 source_type → source로 변환됨
     economic_events = []
     for record in raw_records:
-        source = record.get("source") if isinstance(record, dict) else getattr(record, "source", None)
+        source = (
+            record.get("source")
+            if isinstance(record, dict)
+            else getattr(record, "source", None)
+        )
         if source == "economic_calendar":
             economic_events.append(record)
 
@@ -533,16 +561,15 @@ async def _generate_segmented_narratives(
         try:
             logger.info("[InsightNode] Macro 내러티브 생성 중 (2개 문단 고정)...")
             macro_prompt = build_macro_narrative_prompt(
-                macro_keywords,
-                source_highlights,
-                economic_events=economic_events
+                macro_keywords, source_highlights, economic_events=economic_events
             )
             macro_response = await llm_client.generate_content_async(
-                prompt=macro_prompt,
-                response_format="json"
+                prompt=macro_prompt, response_format="json"
             )
             narratives["macro"] = parse_narrative_response(macro_response, "Macro")
-            logger.info(f"[InsightNode] Macro 내러티브 {len(narratives['macro'])}개 문단 생성 완료")
+            logger.info(
+                f"[InsightNode] Macro 내러티브 {len(narratives['macro'])}개 문단 생성 완료"
+            )
         except Exception as exc:
             error_msg = f"Macro 내러티브 생성 실패: {exc}"
             logger.error(f"[InsightNode] {error_msg}", exc_info=True)
@@ -560,14 +587,15 @@ async def _generate_segmented_narratives(
                 crypto_keywords,
                 source_highlights,
                 num_paragraphs=crypto_paragraphs,
-                economic_events=economic_events
+                economic_events=economic_events,
             )
             crypto_response = await llm_client.generate_content_async(
-                prompt=crypto_prompt,
-                response_format="json"
+                prompt=crypto_prompt, response_format="json"
             )
             narratives["crypto"] = parse_narrative_response(crypto_response, "Crypto")
-            logger.info(f"[InsightNode] Crypto 내러티브 {len(narratives['crypto'])}개 문단 생성 완료")
+            logger.info(
+                f"[InsightNode] Crypto 내러티브 {len(narratives['crypto'])}개 문단 생성 완료"
+            )
         except Exception as exc:
             error_msg = f"Crypto 내러티브 생성 실패: {exc}"
             logger.error(f"[InsightNode] {error_msg}", exc_info=True)
@@ -585,14 +613,17 @@ async def _generate_segmented_narratives(
             narratives.get("crypto", []),
             all_keywords,
             num_paragraphs=integrated_paragraphs,
-            economic_events=economic_events
+            economic_events=economic_events,
         )
         integrated_response = await llm_client.generate_content_async(
-            prompt=integrated_prompt,
-            response_format="json"
+            prompt=integrated_prompt, response_format="json"
         )
-        narratives["integrated"] = parse_narrative_response(integrated_response, "Integrated")
-        logger.info(f"[InsightNode] 통합 내러티브 {len(narratives['integrated'])}개 문단 생성 완료")
+        narratives["integrated"] = parse_narrative_response(
+            integrated_response, "Integrated"
+        )
+        logger.info(
+            f"[InsightNode] 통합 내러티브 {len(narratives['integrated'])}개 문단 생성 완료"
+        )
     except Exception as exc:
         error_msg = f"통합 내러티브 생성 실패: {exc}"
         logger.error(f"[InsightNode] {error_msg}", exc_info=True)
@@ -612,8 +643,7 @@ async def _generate_segmented_narratives(
             id_mapping=id_mapping,
         )
         insight_response = await llm_client.generate_content_async(
-            prompt=insight_prompt,
-            response_format="json"
+            prompt=insight_prompt, response_format="json"
         )
         insights_data = parse_insight_response(insight_response)
 
@@ -623,7 +653,7 @@ async def _generate_segmented_narratives(
         logger.info(
             "[InsightNode] 거래 인사이트 생성 완료: 기회=%d, 위험=%d",
             len(trading_insights.get("opportunities", [])),
-            len(trading_insights.get("risks", []))
+            len(trading_insights.get("risks", [])),
         )
 
     except Exception as exc:
@@ -638,4 +668,3 @@ async def _generate_segmented_narratives(
         "trading_insights": trading_insights,
         "key_sources": key_sources,
     }
-

@@ -7,17 +7,17 @@ LLM 파이프라인 문서의 섹션 7을 참조하여 구현되었습니다.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any
 
 from src.workflows.state import AnalysisState
+
 
 logger = logging.getLogger(__name__)
 
 
-def build_json_report(state: AnalysisState) -> Dict[str, Any]:
+def build_json_report(state: AnalysisState) -> dict[str, Any]:
     """
     AnalysisState에서 JSON 리포트를 생성합니다.
 
@@ -55,8 +55,7 @@ def build_json_report(state: AnalysisState) -> Dict[str, Any]:
     if narratives and isinstance(narratives, dict):
         # 세분화된 내러티브 (2-카테고리: macro, crypto, integrated)
         total_paragraphs = sum(
-            len(narratives.get(cat, []))
-            for cat in ["macro", "crypto", "integrated"]
+            len(narratives.get(cat, [])) for cat in ["macro", "crypto", "integrated"]
         )
         narrative_info = f"세분화된 내러티브 {total_paragraphs}개 문단"
     else:
@@ -134,14 +133,13 @@ def build_markdown_report(
     markdown_content = "\n\n".join(markdown_parts)
 
     logger.info(
-        "[ReportBuilder] Markdown 리포트 생성 완료: "
-        f"길이={len(markdown_content)}자"
+        "[ReportBuilder] Markdown 리포트 생성 완료: " f"길이={len(markdown_content)}자"
     )
 
     return markdown_content
 
 
-def _build_execution_metadata(state: AnalysisState) -> Dict[str, Any]:
+def _build_execution_metadata(state: AnalysisState) -> dict[str, Any]:
     """
     실행 메타데이터를 구성합니다.
 
@@ -178,7 +176,7 @@ def _build_execution_metadata(state: AnalysisState) -> Dict[str, Any]:
     return metadata
 
 
-def _build_top_keywords(state: AnalysisState) -> List[Dict[str, Any]]:
+def _build_top_keywords(state: AnalysisState) -> list[dict[str, Any]]:
     """
     상위 키워드 리스트를 구성합니다.
 
@@ -198,11 +196,11 @@ def _build_top_keywords(state: AnalysisState) -> List[Dict[str, Any]]:
 
     # 키워드를 딕셔너리로 변환 (TypedDict는 dict처럼 사용 가능)
     keywords = []
-    for idx, keyword in enumerate(aggregated_keywords, start=1):
+    for _idx, keyword in enumerate(aggregated_keywords, start=1):
         if not isinstance(keyword, dict):
             keyword = dict(keyword)
 
-        keyword_dict: Dict[str, Any] = {
+        keyword_dict: dict[str, Any] = {
             "term": keyword.get("term", ""),
             "original_variants": keyword.get("original_variants", []),
             "score": float(keyword.get("score", 0.0)),
@@ -220,9 +218,7 @@ def _build_top_keywords(state: AnalysisState) -> List[Dict[str, Any]]:
 
         keywords.append(keyword_dict)
 
-    logger.debug(
-        f"[ReportBuilder] 상위 키워드 {len(keywords)}개 구성 완료"
-    )
+    logger.debug(f"[ReportBuilder] 상위 키워드 {len(keywords)}개 구성 완료")
 
     return keywords
 
@@ -324,9 +320,7 @@ def _build_markdown_keywords_section(state: AnalysisState) -> str:
 
         # 원본 변형 정보 포맷팅 (최대 3개만 표시)
         if original_variants:
-            variants_display = ", ".join(
-                str(v) for v in original_variants[:3]
-            )
+            variants_display = ", ".join(str(v) for v in original_variants[:3])
             if len(original_variants) > 3:
                 variants_display += f" 외 {len(original_variants) - 3}개"
         else:
@@ -375,17 +369,23 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
         # Macro 내러티브
         macro_narratives = narratives.get("macro", [])
         if macro_narratives:
-            sections.append("### Macro 내러티브 요약\n\n" + "\n\n".join(macro_narratives))
+            sections.append(
+                "### Macro 내러티브 요약\n\n" + "\n\n".join(macro_narratives)
+            )
 
         # Crypto 내러티브 (통합: 온체인 + 제도권)
         crypto_narratives = narratives.get("crypto", [])
         if crypto_narratives:
-            sections.append("### Crypto 내러티브 요약\n\n" + "\n\n".join(crypto_narratives))
+            sections.append(
+                "### Crypto 내러티브 요약\n\n" + "\n\n".join(crypto_narratives)
+            )
 
         # 통합 내러티브
         integrated_narratives = narratives.get("integrated", [])
         if integrated_narratives:
-            sections.append("### 통합 내러티브 요약\n\n" + "\n\n".join(integrated_narratives))
+            sections.append(
+                "### 통합 내러티브 요약\n\n" + "\n\n".join(integrated_narratives)
+            )
 
         if not sections:
             return "## 시장 내러티브 요약\n\n내러티브 요약이 없습니다."
@@ -401,7 +401,7 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
 
         # 각 문단을 별도 줄로 표시
         paragraphs = []
-        for idx, paragraph in enumerate(narrative_summary, start=1):
+        for _idx, paragraph in enumerate(narrative_summary, start=1):
             paragraphs.append(f"{paragraph}")
 
         section = "## 시장 내러티브 요약\n\n" + "\n\n".join(paragraphs)
@@ -453,7 +453,10 @@ def _build_markdown_insights_section(state: AnalysisState) -> str:
         volatility_keywords = []
 
     # 하위 호환성: 기존 market_sentiment 필드 처리
-    if "market_sentiment" in trading_insights and "direction_sentiment" not in trading_insights:
+    if (
+        "market_sentiment" in trading_insights
+        and "direction_sentiment" not in trading_insights
+    ):
         old_sentiment = trading_insights.get("market_sentiment", "N/A")
         direction_value = str(old_sentiment)
         direction_confidence = 0
@@ -479,8 +482,12 @@ def _build_markdown_insights_section(state: AnalysisState) -> str:
         risks_text += "위험 항목이 없습니다.\n"
 
     # 시장 심리 섹션 (방향성 + 변동성)
-    direction_keywords_str = ", ".join(direction_keywords) if direction_keywords else "-"
-    volatility_keywords_str = ", ".join(volatility_keywords) if volatility_keywords else "-"
+    direction_keywords_str = (
+        ", ".join(direction_keywords) if direction_keywords else "-"
+    )
+    volatility_keywords_str = (
+        ", ".join(volatility_keywords) if volatility_keywords else "-"
+    )
 
     sentiment_text = f"""### 시장 심리
 
@@ -535,10 +542,7 @@ def _build_markdown_sources_section(state: AnalysisState) -> str:
             relevance_text = str(relevance) if relevance else ""
 
         # 링크가 있으면 마크다운 링크 형식으로, 없으면 텍스트만
-        if url:
-            source_text = f"{idx}. [{title}]({url})"
-        else:
-            source_text = f"{idx}. {title}"
+        source_text = f"{idx}. [{title}]({url})" if url else f"{idx}. {title}"
 
         if relevance_text:
             source_text += f" - {relevance_text}"
@@ -563,7 +567,9 @@ def _build_markdown_quality_section(state: AnalysisState) -> str:
     quality_metrics = state.get("quality_metrics")
 
     if not quality_metrics:
-        logger.debug("[ReportBuilder] quality_metrics가 state에 없습니다. 품질 평가 섹션을 건너뜁니다.")
+        logger.debug(
+            "[ReportBuilder] quality_metrics가 state에 없습니다. 품질 평가 섹션을 건너뜁니다."
+        )
         logger.debug(f"[ReportBuilder] state keys: {list(state.keys())}")
         return ""
 
@@ -616,36 +622,42 @@ def _build_markdown_quality_section(state: AnalysisState) -> str:
     for status in narrative_status:
         section_parts.append(f"- {status}")
 
-    section_parts.extend([
-        "",
-        f"**품질 점수**: {narrative_score:.1%}",
-        "",
-        "#### 동적 학습 효율성",
-        "",
-        f"- **학습된 키워드**: {dynamic_learned}개",
-        f"- **사용된 키워드**: {dynamic_used}개",
-        f"- **학습 효율성**: {learning_score:.1%}",
-    ])
+    section_parts.extend(
+        [
+            "",
+            f"**품질 점수**: {narrative_score:.1%}",
+            "",
+            "#### 동적 학습 효율성",
+            "",
+            f"- **학습된 키워드**: {dynamic_learned}개",
+            f"- **사용된 키워드**: {dynamic_used}개",
+            f"- **학습 효율성**: {learning_score:.1%}",
+        ]
+    )
 
     # 경고 및 권장사항
     warnings = quality_metrics.get("warnings", [])
     recommendations = quality_metrics.get("recommendations", [])
 
     if warnings:
-        section_parts.extend([
-            "",
-            "#### ⚠️ 경고",
-            "",
-        ])
+        section_parts.extend(
+            [
+                "",
+                "#### ⚠️ 경고",
+                "",
+            ]
+        )
         for warning in warnings:
             section_parts.append(f"- {warning}")
 
     if recommendations:
-        section_parts.extend([
-            "",
-            "#### 💡 권장사항",
-            "",
-        ])
+        section_parts.extend(
+            [
+                "",
+                "#### 💡 권장사항",
+                "",
+            ]
+        )
         for rec in recommendations:
             section_parts.append(f"- {rec}")
 
@@ -696,4 +708,3 @@ def _build_markdown_errors_section(state: AnalysisState) -> str:
     section = "## 에러\n\n" + "\n".join(error_items)
 
     return section
-

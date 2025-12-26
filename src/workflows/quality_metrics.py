@@ -7,8 +7,8 @@
 """
 
 import logging
-from typing import Dict, List, Any
 from dataclasses import dataclass
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +19,12 @@ class QualityMetrics:
 
     # 키워드 분류 품질
     total_keywords: int
-    categorized_keywords: Dict[str, int]  # {category: count}
+    categorized_keywords: dict[str, int]  # {category: count}
     category_balance_score: float  # 0.0 ~ 1.0 (균형도)
 
     # 내러티브 품질
-    narratives_generated: Dict[str, bool]  # {category: generated}
-    narrative_lengths: Dict[str, int]  # {category: character_count}
+    narratives_generated: dict[str, bool]  # {category: generated}
+    narrative_lengths: dict[str, int]  # {category: character_count}
     narrative_quality_score: float  # 0.0 ~ 1.0
 
     # 동적 학습 효과
@@ -36,8 +36,8 @@ class QualityMetrics:
     overall_quality_score: float  # 0.0 ~ 1.0
 
     # 경고 및 권장사항
-    warnings: List[str]
-    recommendations: List[str]
+    warnings: list[str]
+    recommendations: list[str]
 
 
 class QualityEvaluator:
@@ -45,14 +45,14 @@ class QualityEvaluator:
 
     def __init__(self):
         self.min_keywords_per_category = 1  # 카테고리별 최소 키워드 수
-        self.min_narrative_length = 200     # 내러티브 최소 길이 (한글 기준)
+        self.min_narrative_length = 200  # 내러티브 최소 길이 (한글 기준)
         self.target_category_balance = 0.3  # 목표 균형도 (최소 30%)
 
     def evaluate(
         self,
-        categorized_keywords: Dict[str, List[Dict]],
-        narratives: Dict[str, str],
-        dynamic_keywords_cache: Dict = None
+        categorized_keywords: dict[str, list[dict]],
+        narratives: dict[str, str],
+        dynamic_keywords_cache: dict = None,
     ) -> QualityMetrics:
         """
         전체 품질을 평가합니다.
@@ -71,7 +71,7 @@ class QualityEvaluator:
         # 1. 키워드 분류 품질 평가 (2-카테고리 시스템)
         keyword_counts = {
             "macro": len(categorized_keywords.get("macro", [])),
-            "crypto": len(categorized_keywords.get("crypto", []))
+            "crypto": len(categorized_keywords.get("crypto", [])),
         }
         total_keywords = sum(keyword_counts.values())
 
@@ -95,12 +95,17 @@ class QualityEvaluator:
                 )
 
             # 경고: 내러티브 너무 짧음
-            elif narrative_lengths[category] < self.min_narrative_length and narratives_generated[category]:
+            elif (
+                narrative_lengths[category] < self.min_narrative_length
+                and narratives_generated[category]
+            ):
                 warnings.append(
                     f"{category} 내러티브가 너무 짧습니다 ({narrative_lengths[category]}자)."
                 )
 
-        narrative_quality = self._calculate_narrative_quality(narratives_generated, narrative_lengths)
+        narrative_quality = self._calculate_narrative_quality(
+            narratives_generated, narrative_lengths
+        )
 
         # 3. 동적 학습 효과 측정
         dynamic_learned = 0
@@ -110,8 +115,7 @@ class QualityEvaluator:
             dynamic_learned = len(dynamic_keywords_cache)
             # 동적 키워드가 실제로 사용되었는지 확인
             dynamic_used = self._count_dynamic_keywords_used(
-                categorized_keywords,
-                dynamic_keywords_cache
+                categorized_keywords, dynamic_keywords_cache
             )
 
         learning_effectiveness = (
@@ -130,7 +134,9 @@ class QualityEvaluator:
         # 4. 카테고리별 키워드 부족 경고
         for category, count in keyword_counts.items():
             if count < self.min_keywords_per_category:
-                warnings.append(f"{category} 카테고리에 키워드가 부족합니다 ({count}개).")
+                warnings.append(
+                    f"{category} 카테고리에 키워드가 부족합니다 ({count}개)."
+                )
                 recommendations.append(
                     f"{category} 카테고리의 임계값을 낮추거나 고정 키워드를 추가하세요."
                 )
@@ -152,10 +158,10 @@ class QualityEvaluator:
             learning_effectiveness=learning_effectiveness,
             overall_quality_score=overall_score,
             warnings=warnings,
-            recommendations=recommendations
+            recommendations=recommendations,
         )
 
-    def _calculate_balance_score(self, keyword_counts: Dict[str, int]) -> float:
+    def _calculate_balance_score(self, keyword_counts: dict[str, int]) -> float:
         """
         카테고리 균형도를 계산합니다.
 
@@ -173,10 +179,11 @@ class QualityEvaluator:
 
         # 표준편차 기반 균형도 (낮을수록 균형적)
         import statistics
+
         if len(ratios) == 1:
             return 0.0  # 하나의 카테고리만 있으면 불균형
 
-        mean_ratio = statistics.mean(ratios)
+        statistics.mean(ratios)
         std_dev = statistics.stdev(ratios)
 
         # 정규화: std_dev가 0이면 완벽한 균형 (1.0)
@@ -186,9 +193,7 @@ class QualityEvaluator:
         return balance
 
     def _calculate_narrative_quality(
-        self,
-        generated: Dict[str, bool],
-        lengths: Dict[str, int]
+        self, generated: dict[str, bool], lengths: dict[str, int]
     ) -> float:
         """
         내러티브 품질 점수를 계산합니다.
@@ -222,9 +227,7 @@ class QualityEvaluator:
         return score
 
     def _count_dynamic_keywords_used(
-        self,
-        categorized_keywords: Dict[str, List[Dict]],
-        dynamic_cache: Dict
+        self, categorized_keywords: dict[str, list[dict]], dynamic_cache: dict
     ) -> int:
         """
         동적 학습된 키워드 중 실제로 사용된 개수를 셉니다.
@@ -242,10 +245,7 @@ class QualityEvaluator:
         return used_count
 
     def _calculate_overall_score(
-        self,
-        balance: float,
-        narrative_quality: float,
-        learning_effectiveness: float
+        self, balance: float, narrative_quality: float, learning_effectiveness: float
     ) -> float:
         """
         전체 품질 점수를 계산합니다.
@@ -255,11 +255,7 @@ class QualityEvaluator:
         - 내러티브 품질: 50%
         - 학습 효과: 20%
         """
-        return (
-            balance * 0.3 +
-            narrative_quality * 0.5 +
-            learning_effectiveness * 0.2
-        )
+        return balance * 0.3 + narrative_quality * 0.5 + learning_effectiveness * 0.2
 
     def print_report(self, metrics: QualityMetrics) -> str:
         """

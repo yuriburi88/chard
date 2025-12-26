@@ -10,7 +10,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Set, Optional
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class DynamicKeywordManager:
         """
         self.cache_file = Path(cache_file)
         self.ttl_hours = ttl_hours
-        self.cache: Dict[str, Dict] = {}
+        self.cache: dict[str, dict] = {}
 
         # 캐시 로드
         self._load_cache()
@@ -47,12 +47,14 @@ class DynamicKeywordManager:
     def _load_cache(self) -> None:
         """JSON 캐시 파일에서 동적 키워드를 로드합니다."""
         if not self.cache_file.exists():
-            logger.info(f"캐시 파일이 없습니다: {self.cache_file}. 빈 캐시로 시작합니다.")
+            logger.info(
+                f"캐시 파일이 없습니다: {self.cache_file}. 빈 캐시로 시작합니다."
+            )
             self.cache = {}
             return
 
         try:
-            with open(self.cache_file, "r", encoding="utf-8") as f:
+            with open(self.cache_file, encoding="utf-8") as f:
                 self.cache = json.load(f)
             logger.info(f"캐시 로드 완료: {len(self.cache)}개의 동적 키워드")
         except Exception as e:
@@ -98,12 +100,14 @@ class DynamicKeywordManager:
             del self.cache[keyword]
 
         if expired_keywords:
-            logger.info(f"만료된 {len(expired_keywords)}개의 키워드 제거: {expired_keywords[:5]}...")
+            logger.info(
+                f"만료된 {len(expired_keywords)}개의 키워드 제거: {expired_keywords[:5]}..."
+            )
             self._save_cache()
 
     def update_keywords(
         self,
-        learned_keywords: Dict[str, List[str]],
+        learned_keywords: dict[str, list[str]],
     ) -> None:
         """
         LLM이 학습한 새로운 키워드를 캐시에 추가합니다.
@@ -133,10 +137,12 @@ class DynamicKeywordManager:
                     }
                     added_count += 1
 
-        logger.info(f"동적 키워드 업데이트 완료: {added_count}개 추가, 총 {len(self.cache)}개")
+        logger.info(
+            f"동적 키워드 업데이트 완료: {added_count}개 추가, 총 {len(self.cache)}개"
+        )
         self._save_cache()
 
-    def get_keywords_by_category(self, category: str) -> Set[str]:
+    def get_keywords_by_category(self, category: str) -> set[str]:
         """
         특정 카테고리에 속한 동적 키워드를 반환합니다.
 
@@ -155,7 +161,7 @@ class DynamicKeywordManager:
 
         return keywords
 
-    def get_all_keywords(self) -> Dict[str, Set[str]]:
+    def get_all_keywords(self) -> dict[str, set[str]]:
         """
         모든 동적 키워드를 카테고리별로 반환합니다.
 

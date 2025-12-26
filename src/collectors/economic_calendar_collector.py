@@ -9,9 +9,10 @@ Investing.com 등에서 경제 지표 발표 일정과 결과를 수집하는 �
 
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +20,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EconomicEvent:
     """경제 지표 이벤트"""
+
     event_name: str
     country: str
     timestamp: datetime
     importance: str  # High, Medium, Low
-    actual: Optional[str]
-    forecast: Optional[str]
-    previous: Optional[str]
+    actual: str | None
+    forecast: str | None
+    previous: str | None
     currency: str
     source: str = "economic_calendar"
 
@@ -45,6 +47,7 @@ class EconomicCalendarCollector:
         """필요한 라이브러리 확인"""
         try:
             import investpy
+
             self.investpy = investpy
         except ImportError:
             logger.warning(
@@ -55,11 +58,11 @@ class EconomicCalendarCollector:
 
     async def collect(
         self,
-        countries: List[str] = None,
+        countries: list[str] = None,
         importance: str = "high",
-        from_date: Optional[datetime] = None,
-        to_date: Optional[datetime] = None
-    ) -> List[Dict[str, Any]]:
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+    ) -> list[dict[str, Any]]:
         """
         경제 지표 데이터를 수집합니다.
 
@@ -73,12 +76,25 @@ class EconomicCalendarCollector:
             정규화된 레코드 리스트 (raw_records 형식과 호환)
         """
         if self.investpy is None:
-            logger.error("[EconomicCalendarCollector] investpy가 설치되지 않아 수집을 건너뜁니다.")
+            logger.error(
+                "[EconomicCalendarCollector] investpy가 설치되지 않아 수집을 건너뜁니다."
+            )
             return []
 
         # 기본값 설정
         if countries is None:
-            countries = ["united states", "china", "japan", "eurozone", "canada", "australia", "united kingdom", "germany", "france", "south korea"]
+            countries = [
+                "united states",
+                "china",
+                "japan",
+                "eurozone",
+                "canada",
+                "australia",
+                "united kingdom",
+                "germany",
+                "france",
+                "south korea",
+            ]
 
         if from_date is None:
             from_date = datetime.now(timezone.utc) - timedelta(days=7)
@@ -98,26 +114,25 @@ class EconomicCalendarCollector:
             countries=countries,
             importance=importance,
             from_date=from_date,
-            to_date=to_date
+            to_date=to_date,
         )
 
         # raw_records 형식으로 변환
         records = self._normalize_to_records(events)
 
         logger.info(
-            f"[Economic Calendar 수집 완료] "
-            f"총 {len(records)}개 이벤트 수집"
+            f"[Economic Calendar 수집 완료] " f"총 {len(records)}개 이벤트 수집"
         )
 
         return records
 
     def _fetch_calendar(
         self,
-        countries: List[str],
+        countries: list[str],
         importance: str,
         from_date: datetime,
-        to_date: datetime
-    ) -> List[EconomicEvent]:
+        to_date: datetime,
+    ) -> list[EconomicEvent]:
         """
         investpy를 사용하여 경제 지표 데이터를 가져옵니다.
 
@@ -138,7 +153,7 @@ class EconomicCalendarCollector:
                     countries=[country],
                     from_date=from_str,
                     to_date=to_str,
-                    importances=[importance] if importance != "all" else None
+                    importances=[importance] if importance != "all" else None,
                 )
 
                 if calendar_df.empty:
@@ -157,13 +172,12 @@ class EconomicCalendarCollector:
 
             except Exception as exc:
                 logger.error(
-                    f"[Economic Calendar] {country} 수집 실패: {exc}",
-                    exc_info=True
+                    f"[Economic Calendar] {country} 수집 실패: {exc}", exc_info=True
                 )
 
         return events
 
-    def _parse_event(self, row, country: str) -> Optional[EconomicEvent]:
+    def _parse_event(self, row, country: str) -> EconomicEvent | None:
         """DataFrame row를 EconomicEvent로 변환"""
         try:
             # 필수 필드 확인
@@ -185,9 +199,21 @@ class EconomicCalendarCollector:
                 country=country.title(),
                 timestamp=timestamp,
                 importance=row.get("importance", "Medium"),
-                actual=str(row.get("actual", "")) if row.get("actual") is not None else None,
-                forecast=str(row.get("forecast", "")) if row.get("forecast") is not None else None,
-                previous=str(row.get("previous", "")) if row.get("previous") is not None else None,
+                actual=(
+                    str(row.get("actual", ""))
+                    if row.get("actual") is not None
+                    else None
+                ),
+                forecast=(
+                    str(row.get("forecast", ""))
+                    if row.get("forecast") is not None
+                    else None
+                ),
+                previous=(
+                    str(row.get("previous", ""))
+                    if row.get("previous") is not None
+                    else None
+                ),
                 currency=row.get("currency", "USD"),
             )
 
@@ -195,7 +221,9 @@ class EconomicCalendarCollector:
             logger.warning(f"[Economic Calendar] 이벤트 파싱 실패: {exc}")
             return None
 
-    def _normalize_to_records(self, events: List[EconomicEvent]) -> List[Dict[str, Any]]:
+    def _normalize_to_records(
+        self, events: list[EconomicEvent]
+    ) -> list[dict[str, Any]]:
         """
         EconomicEvent를 raw_records 형식으로 변환
 
@@ -230,7 +258,7 @@ class EconomicCalendarCollector:
                     "impact": impact,
                     "currency": event.currency,
                     "event_time": event.timestamp.isoformat(),
-                }
+                },
             }
 
             records.append(record)
@@ -247,9 +275,7 @@ class EconomicCalendarCollector:
         now = datetime.now(timezone.utc)
         is_future = event.timestamp > now
 
-        parts = [
-            f"[{event.country}] {event.event_name}"
-        ]
+        parts = [f"[{event.country}] {event.event_name}"]
 
         # 미래 이벤트 (예정된 발표)
         if is_future:
@@ -275,7 +301,7 @@ class EconomicCalendarCollector:
                     elif actual_val < forecast_val:
                         parts.append(f"(예상 {event.forecast} 하회)")
                     else:
-                        parts.append(f"(예상치 일치)")
+                        parts.append("(예상치 일치)")
                 except (ValueError, AttributeError):
                     # 숫자 변환 실패 시 그냥 표시
                     parts.append(f"(예상: {event.forecast})")
@@ -306,15 +332,25 @@ class EconomicCalendarCollector:
             actual_val = float(event.actual.replace("%", "").replace(",", ""))
             forecast_val = float(event.forecast.replace("%", "").replace(",", ""))
 
-            diff_pct = abs((actual_val - forecast_val) / forecast_val) * 100 if forecast_val != 0 else 0
+            diff_pct = (
+                abs((actual_val - forecast_val) / forecast_val) * 100
+                if forecast_val != 0
+                else 0
+            )
 
             # 5% 이상 차이나면 영향 있음으로 판단
             if diff_pct > 5:
                 # 경제 지표별 방향성 판단 (간단한 휴리스틱)
-                if "cpi" in event.event_name.lower() or "inflation" in event.event_name.lower():
+                if (
+                    "cpi" in event.event_name.lower()
+                    or "inflation" in event.event_name.lower()
+                ):
                     # 인플레이션: 예상보다 높으면 부정적 (금리 인상 압력)
                     return "negative" if actual_val > forecast_val else "positive"
-                elif "gdp" in event.event_name.lower() or "employment" in event.event_name.lower():
+                elif (
+                    "gdp" in event.event_name.lower()
+                    or "employment" in event.event_name.lower()
+                ):
                     # GDP, 고용: 예상보다 높으면 긍정적
                     return "positive" if actual_val > forecast_val else "negative"
 
@@ -326,11 +362,11 @@ class EconomicCalendarCollector:
 
 # 비동기 헬퍼 함수 (파이프라인에서 사용)
 async def collect_economic_calendar(
-    countries: List[str] = None,
+    countries: list[str] = None,
     importance: str = "high",
     days_back: int = 7,
-    days_forward: int = 0
-) -> List[Dict[str, Any]]:
+    days_forward: int = 0,
+) -> list[dict[str, Any]]:
     """
     Economic Calendar 데이터를 비동기로 수집하는 헬퍼 함수
 
@@ -349,8 +385,5 @@ async def collect_economic_calendar(
     to_date = datetime.now(timezone.utc) + timedelta(days=days_forward)
 
     return await collector.collect(
-        countries=countries,
-        importance=importance,
-        from_date=from_date,
-        to_date=to_date
+        countries=countries, importance=importance, from_date=from_date, to_date=to_date
     )

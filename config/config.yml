@@ -1,0 +1,267 @@
+# 수집 기간 설정
+# mode: "recent_hours" - 현재 시간에서 N시간 전까지 (예: 24시간 전 ~ 현재)
+# mode: "days_back" - N일 전 00:00부터 현재까지 (예: 1일 전 = 어제 00:00 ~ 현재)
+#
+# 예시 (현재 11/24 16:44인 경우):
+#   mode: recent_hours, recent_hours: 24 → 11/23 16:44 ~ 현재
+#   mode: days_back, days_back: 1 → 11/23 00:00 ~ 현재
+#   mode: days_back, days_back: 3 → 11/21 00:00 ~ 현재
+collection_period:
+  mode: days_back      # "recent_hours" 또는 "days_back"
+  days_back: 1         # mode가 "days_back"일 때: N일 전 00:00부터
+  recent_hours: 24     # mode가 "recent_hours"일 때: 최근 N시간
+rss_sources:
+- name: BlockMedia
+  url: https://www.blockmedia.co.kr/feed
+  priority: 1.2
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: CoinDesk
+  url: https://www.coindesk.com/arc/outboundfeeds/rss?outputType=xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: CoinTelegraph
+  url: https://cointelegraph.com/rss
+  priority: 1.2
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: The Block
+  url: https://www.theblock.co/rss.xml
+  priority: 1.2
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: CryptoSlate
+  url: https://cryptoslate.com/feed/
+  priority: 1.1
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: Decrypt
+  url: https://decrypt.co/feed
+  priority: 1.1
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: FinancialJuice
+  url: https://www.financialjuice.com/feed.ashx?xy=rss
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24  
+#- name: GoogleNews
+#  url: https://news.google.com/rss/search?q=when:24h+allinurl:bloomberg.com&hl=en-US&gl=US&ceid=US:en
+#  priority: 1.1
+#  timezone: 9
+#  max_articles: 5000
+#  hours_back: 24
+- name: Informax_FIC
+  url: https://news.einfomax.co.kr/rss/S1N16.xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: Informax_Sec
+  url: https://news.einfomax.co.kr/rss/S1N2.xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: Informax_ForeignStock
+  url: https://news.einfomax.co.kr/rss/S1N21.xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24  
+- name: Informax_Gloabal
+  url: https://news.einfomax.co.kr/rss/S1N23.xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24    
+- name: Informax_FnPl
+  url: https://news.einfomax.co.kr/rss/S1N15.xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: Informax_IBCorp
+  url: https://news.einfomax.co.kr/rss/S1N7.xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: Informax_own
+  url: https://news.einfomax.co.kr/rss/S1N13.xml
+  priority: 1.1
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: Informax_TopClick
+  url: https://news.einfomax.co.kr/rss/clickTop.xml
+  priority: 1.2
+  timezone: 9
+  max_articles: 5000
+  hours_back: 24
+- name: TheDefiant
+  url: https://thedefiant.io/feed/
+  priority: 1.1
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: CoinDesk2
+  url: https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml
+  priority: 1.1
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: CryptoPotato
+  url: https://cryptopotato.com/feed/
+  priority: 1.1
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: CryptoNews
+  url: https://cryptonews.com/news/feed/
+  priority: 1.1
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: SmartLiquidity
+  url: https://smartliquidity.info/feed/
+  priority: 1.1
+  timezone: 0
+  max_articles: 5000
+  hours_back: 24
+- name: YahooFinance
+  url: https://finance.yahoo.com/news/rssindex
+  priority: 1.1
+  timezone: -5
+  max_articles: 5000
+  hours_back: 24
+- name: CNBCFinance
+  url: https://www.cnbc.com/id/10000664/device/rss/rss.html
+  priority: 1.1
+  timezone: -5
+  max_articles: 5000
+  hours_back: 24
+
+# Economic Calendar 설정 (선택사항)
+economic_calendar:
+  enabled: true                           # Economic Calendar 수집 활성화
+  countries:                              # 수집할 국가 리스트
+    - united states
+    - china
+    - japan
+    - eurozone
+    - canada
+    - australia
+    - united kingdom
+    - germany
+    - france
+    - south korea
+  importance: high                        # 중요도 필터: high, medium, low, all
+  days_back: 7                            # 과거 며칠 데이터 수집
+  days_forward: 14                        # 미래 며칠 예정 일정 수집 (예정된 지표 발표)
+
+telegram_sources:
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: coinnesskr
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: WeCryptoTogether
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: YeouidoStory2
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: blockmedia
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: Jenti_DeFi
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: BChoSN
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: telonews_kr
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+- name: rich_kim88
+  auth_method: mtproto
+  channel_id: jk_bond
+  tg_cred_id: eric
+  session_file: secrets/telegram_sessions/tg_cred_eric.session
+  max_messages: 5000
+llm:
+  model: gemini-2.5-flash
+  provider: google
+  max_tokens: 8000
+  temperature: 0.1
+  chunk_size: 50000
+  parallel_concurrency: 3
+preprocessing:
+  split_long_messages: true
+  max_tokens_per_segment: 4000
+  segment_overlap_tokens: 200
+normalization:
+  embedding_threshold: 0.90  # 0.75 → 0.90 (클러스터링을 더 엄격하게, 서로 다른 키워드를 분리)
+  dbscan_min_samples: 2      # 3 → 2 (클러스터 형성 조건 완화)
+  llm_verification_enabled: true
+  llm_verification_top_n: 30  # 20 → 30 (더 많은 후보 검토)
+  embedding_provider: google
+  embedding_model: models/text-embedding-004
+
+# 내러티브 세분화 설정 (3단계: Macro → Crypto → Integrated)
+narrative:
+  enable_segmentation: true          # 내러티브 세분화 활성화
+  # macro_paragraphs: 2              # [고정] Macro 내러티브는 항상 2개 문단 (과거 분석 + 미래 전망)
+  crypto_paragraphs: 2               # Crypto 내러티브 문단 수 (온체인+제도권 통합)
+  integrated_paragraphs: 3           # 통합 내러티브 문단 수 (Macro+Crypto 참조)
+  min_category_confidence: 0.5       # 카테고리 분류 최소 신뢰도 (deprecated, category_thresholds 사용 권장)
+
+  # 카테고리별 차등 임계값 (2-카테고리 시스템: Macro, Crypto)
+  category_thresholds:
+    macro: 0.4                       # 거시경제: 중간 수준 (금리, GDP, 인플레이션 등)
+    crypto: 0.3                      # 암호화폐: 관대 (BTC, ETH, DeFi, ETF, 규제 등)
+
+  # 동적 키워드 학습 설정
+  dynamic_keywords:
+    enabled: true                    # 동적 키워드 학습 활성화
+    learning_top_n: 30               # 상위 N개 키워드 학습
+    min_frequency: 4                 # 최소 출현 빈도
+    ttl_hours: 24                    # 키워드 유효 시간 (24시간)
+    cache_file: "dynamic_keywords_cache.json"  # 캐시 파일 경로
+
+output:
+  top_keywords_count: 10
+  summary_paragraphs: 4              # 세분화 비활성화 시 사용되는 문단 수
+  log_level: INFO
+  log_filename_strategy: timestamp
+  log_fixed_window_days: 10
+  display_timezone: 9
+  output_dir: output

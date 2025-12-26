@@ -7,40 +7,44 @@ LLM 파이프라인에서 사용하는 프롬프트 템플릿을 정의합니다
 from __future__ import annotations
 
 import json
-import re
 import logging
-from typing import Dict, List, Mapping, Sequence, Tuple, Optional, Any
+import re
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
 
-def parse_json_from_llm_response(response_text: str, context: str = "LLM 응답") -> Dict[str, object]:
+def parse_json_from_llm_response(
+    response_text: str, context: str = "LLM 응답"
+) -> dict[str, object]:
     """
     LLM 응답에서 JSON을 추출하고 파싱합니다.
-    
+
     마크다운 코드 블록(```json ... ```) 형식의 응답도 처리합니다.
     불완전한 JSON(응답이 잘린 경우)도 감지합니다.
-    
+
     Args:
         response_text: LLM 응답 텍스트
         context: 에러 메시지에 사용할 컨텍스트 (기본값: "LLM 응답")
-    
+
     Returns:
         파싱된 JSON 딕셔너리
-    
+
     Raises:
         ValueError: JSON 파싱 실패 시 (불완전한 JSON 포함)
     """
     sanitized_text = response_text.strip()
-    
+
     # 마크다운 코드 블록 제거
     if sanitized_text.startswith("```"):
         start_idx = sanitized_text.find("```")
         end_idx = sanitized_text.find("```", start_idx + 3)
-        
+
         if end_idx != -1:
             sanitized_text = sanitized_text[start_idx + 3 : end_idx].strip()
-            
+
             # "json" 접두사 제거
             if sanitized_text.startswith("json"):
                 sanitized_text = sanitized_text[4:].strip()
@@ -49,19 +53,22 @@ def parse_json_from_llm_response(response_text: str, context: str = "LLM 응답"
             sanitized_text = sanitized_text[start_idx + 3 :].strip()
             if sanitized_text.startswith("json"):
                 sanitized_text = sanitized_text[4:].strip()
-    
+
     # 불완전한 JSON 감지: 닫는 중괄호가 없거나 불균형
     open_braces = sanitized_text.count("{")
     close_braces = sanitized_text.count("}")
     open_brackets = sanitized_text.count("[")
     close_brackets = sanitized_text.count("]")
-    
+
     is_truncated = (
-        open_braces > close_braces or
-        open_brackets > close_brackets or
-        (sanitized_text.rstrip().endswith(",") and not sanitized_text.rstrip().endswith("}"))
+        open_braces > close_braces
+        or open_brackets > close_brackets
+        or (
+            sanitized_text.rstrip().endswith(",")
+            and not sanitized_text.rstrip().endswith("}")
+        )
     )
-    
+
     # JSON 파싱 시도
     result = None
     try:
@@ -76,10 +83,10 @@ def parse_json_from_llm_response(response_text: str, context: str = "LLM 응답"
                 f"응답 길이: {len(sanitized_text)}자\n"
                 f"응답 끝부분 (마지막 200자): {sanitized_text[-200:]}"
             ) from error
-        
+
         # JSON 객체를 정규식으로 찾아서 파싱 시도
         json_match = re.search(r"\{.*\}", sanitized_text, re.DOTALL)
-        
+
         if json_match:
             try:
                 result = json.loads(json_match.group())
@@ -95,16 +102,16 @@ def parse_json_from_llm_response(response_text: str, context: str = "LLM 응답"
                 f"응답 텍스트 (처음 500자): {sanitized_text[:500]}\n"
                 f"응답 텍스트 (마지막 200자): {sanitized_text[-200:]}"
             ) from error
-    
+
     if not isinstance(result, dict):
         raise ValueError(f"{context}가 딕셔너리가 아닙니다: {type(result)}")
-    
+
     return result
 
 
 def build_keyword_extraction_prompt(
-    chunk: List[Dict[str, object]],
-    economic_events: Optional[List[Dict[str, Any]]] = None
+    chunk: list[dict[str, object]],
+    economic_events: list[dict[str, Any]] | None = None,
 ) -> str:
     """
     카테고리별 키워드 추출을 위한 개선된 프롬프트를 구성합니다.
@@ -142,7 +149,7 @@ def build_keyword_extraction_prompt(
             {
                 "event": e.get("text", ""),
                 "importance": e.get("meta", {}).get("importance", ""),
-                "country": e.get("meta", {}).get("country", "")
+                "country": e.get("meta", {}).get("country", ""),
             }
             for e in economic_events[:20]
         ]
@@ -160,7 +167,7 @@ def build_keyword_extraction_prompt(
 
     user_prompt = (
         "다음은 RSS 기사와 텔레그램 메시지에서 수집한 텍스트입니다.\n"
-        "각 레코드는 고유한 \"id\" 필드를 가지고 있습니다:\n\n"
+        '각 레코드는 고유한 "id" 필드를 가지고 있습니다:\n\n'
         f"{chunk_json}{ec_context}\n\n"
         "**중요: 각 카테고리별로 최소 3개 이상의 키워드를 반드시 추출하세요.**\n\n"
         "요구사항:\n"
@@ -203,9 +210,8 @@ def build_keyword_extraction_prompt(
 
 
 def parse_keyword_extraction_response(
-    response_text: str,
-    id_mapping: Optional[Dict[int, Dict[str, Any]]] = None
-) -> Dict[str, object]:
+    response_text: str, id_mapping: dict[int, dict[str, Any]] | None = None
+) -> dict[str, object]:
     """
     카테고리별 키워드 추출 응답을 파싱하고 검증합니다.
 
@@ -245,14 +251,20 @@ def parse_keyword_extraction_response(
     result = parse_json_from_llm_response(response_text, context="키워드 추출 응답")
 
     # 새로운 구조화된 응답 형식 확인
-    category_fields = ["macro_keywords", "crypto_native_keywords", "crypto_macro_keywords"]
+    category_fields = [
+        "macro_keywords",
+        "crypto_native_keywords",
+        "crypto_macro_keywords",
+    ]
     has_structured_format = any(field in result for field in category_fields)
 
     all_keywords = []
 
     if has_structured_format:
         # 새로운 형식: 카테고리별 키워드 처리
-        logger.info("[parse_keyword_extraction_response] 구조화된 카테고리별 응답 형식 감지")
+        logger.info(
+            "[parse_keyword_extraction_response] 구조화된 카테고리별 응답 형식 감지"
+        )
 
         for category_field in category_fields:
             category_keywords = result.get(category_field, [])
@@ -298,13 +310,17 @@ def parse_keyword_extraction_response(
     else:
         # 기존 형식: keywords 배열 (하위 호환성)
         if "keywords" not in result:
-            raise ValueError("키워드 추출 응답에 'keywords' 또는 카테고리별 필드가 없습니다.")
+            raise ValueError(
+                "키워드 추출 응답에 'keywords' 또는 카테고리별 필드가 없습니다."
+            )
 
         if not isinstance(result["keywords"], list):
             raise ValueError("키워드 추출 응답의 'keywords' 필드가 리스트가 아닙니다.")
 
         all_keywords = result["keywords"]
-        logger.info("[parse_keyword_extraction_response] 기존 형식 (keywords 배열) 사용")
+        logger.info(
+            "[parse_keyword_extraction_response] 기존 형식 (keywords 배열) 사용"
+        )
 
     # evidence_ids 검증 및 정리
     for index, keyword in enumerate(all_keywords, start=1):
@@ -329,14 +345,14 @@ def parse_keyword_extraction_response(
 
         # evidence_ids 필드 확인 (하위 호환성을 위해 evidence도 확인)
         evidence_ids = keyword.get("evidence_ids", [])
-        
+
         # 하위 호환성: evidence 필드가 있으면 무시하고 경고
         if "evidence" in keyword and not evidence_ids:
             logger.warning(
                 f"[parse_keyword_extraction_response] 키워드 {index}에 'evidence' 필드가 있지만 "
                 f"'evidence_ids'가 없습니다. 'evidence' 필드는 무시됩니다."
             )
-        
+
         # evidence_ids가 없으면 빈 리스트로 설정
         if not evidence_ids:
             keyword["evidence_ids"] = []
@@ -350,7 +366,7 @@ def parse_keyword_extraction_response(
             # 유효한 ID만 필터링
             valid_ids = []
             invalid_ids = []
-            
+
             for evidence_id in evidence_ids:
                 # ID가 정수인지 확인
                 if not isinstance(evidence_id, int):
@@ -359,15 +375,15 @@ def parse_keyword_extraction_response(
                     except (ValueError, TypeError):
                         invalid_ids.append(evidence_id)
                         continue
-                
+
                 # ID 매핑이 제공된 경우, 유효성 검증
                 if id_mapping is not None:
                     if evidence_id not in id_mapping:
                         invalid_ids.append(evidence_id)
                         continue
-                
+
                 valid_ids.append(evidence_id)
-            
+
             # 유효하지 않은 ID가 있으면 로그에 기록
             if invalid_ids:
                 logger.warning(
@@ -378,7 +394,7 @@ def parse_keyword_extraction_response(
                     f"ID 매핑 통계: 총 레코드 수={len(id_mapping) if id_mapping else 'N/A'}, "
                     f"유효한 ID 범위={f'{min(id_mapping.keys())}-{max(id_mapping.keys())}' if id_mapping and id_mapping.keys() else 'N/A'}"
                 )
-            
+
             keyword["evidence_ids"] = valid_ids
 
         keyword.setdefault("sources", [])
@@ -458,7 +474,7 @@ def _build_candidate_payload(
     *,
     candidate_keywords: Sequence[Mapping[str, object]],
     max_variants: int,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     LLM 프롬프트에 포함할 후보 키워드 정보를 정규화합니다.
 
@@ -469,7 +485,7 @@ def _build_candidate_payload(
     Returns:
         프롬프트에 포함할 정규화된 후보 정보 리스트.
     """
-    payload: List[Dict[str, object]] = []
+    payload: list[dict[str, object]] = []
 
     for keyword in candidate_keywords:
         term = str(keyword.get("term", "")).strip()
@@ -497,6 +513,7 @@ def _build_candidate_payload(
         if not evidence_ids and "evidence" in keyword:
             # 하위 호환성: evidence 필드가 있으면 경고하고 무시
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(
                 f"[_build_candidate_payload] 키워드 '{term}'에 'evidence' 필드가 있지만 "
@@ -525,8 +542,8 @@ def prepare_insight_prompt_inputs(
     summary_paragraphs: int = 4,
     max_sources: int = 5,
     include_excerpts: bool = True,
-    id_mapping: Optional[Dict[int, Dict[str, Any]]] = None,
-) -> Dict[str, object]:
+    id_mapping: dict[int, dict[str, Any]] | None = None,
+) -> dict[str, object]:
     """
     InsightNode 프롬프트 구성을 위한 입력 데이터를 정규화합니다.
 
@@ -555,7 +572,9 @@ def prepare_insight_prompt_inputs(
 
     normalized_summary_count = max(3, min(summary_paragraphs, 5))
 
-    keyword_payload = _sanitize_aggregated_keywords(aggregated_keywords, id_mapping=id_mapping)
+    keyword_payload = _sanitize_aggregated_keywords(
+        aggregated_keywords, id_mapping=id_mapping
+    )
     source_highlights = _build_source_highlights(
         keyword_payload,
         raw_records,
@@ -578,7 +597,7 @@ def build_insight_prompt(
     max_sources: int = 5,
     include_excerpts: bool = True,
     prepared_inputs: Mapping[str, object] | None = None,
-    id_mapping: Optional[Dict[int, Dict[str, Any]]] = None,
+    id_mapping: dict[int, dict[str, Any]] | None = None,
 ) -> str:
     """
     InsightNode에서 사용할 내러티브/인사이트 생성 프롬프트를 구성합니다.
@@ -647,12 +666,12 @@ def build_insight_prompt(
         '      "value": "상승",\n'
         '      "confidence": 85,\n'
         '      "rationale_keywords": ["키워드1", "키워드2", "키워드3"]\n'
-        '    },\n'
+        "    },\n"
         '    "volatility_sentiment": {\n'
         '      "value": "증가",\n'
         '      "confidence": 72,\n'
         '      "rationale_keywords": ["키워드1", "키워드2"]\n'
-        '    }\n'
+        "    }\n"
         "  },\n"
         '  "key_sources": [\n'
         "    {\n"
@@ -667,7 +686,7 @@ def build_insight_prompt(
     return f"{system_prompt}\n\n{user_prompt}"
 
 
-def parse_insight_response(response_text: str) -> Dict[str, object]:
+def parse_insight_response(response_text: str) -> dict[str, object]:
     """
     InsightNode가 수신한 LLM 응답(JSON)을 파싱하고 검증합니다.
 
@@ -689,7 +708,11 @@ def parse_insight_response(response_text: str) -> Dict[str, object]:
     if not isinstance(narrative_summary, list) or not narrative_summary:
         raise ValueError("'narrative_summary'는 비어있지 않은 리스트여야 합니다.")
 
-    normalized_summary = [str(paragraph).strip() for paragraph in narrative_summary if str(paragraph).strip()]
+    normalized_summary = [
+        str(paragraph).strip()
+        for paragraph in narrative_summary
+        if str(paragraph).strip()
+    ]
     if not normalized_summary:
         raise ValueError("'narrative_summary'에 유효한 문단이 없습니다.")
 
@@ -704,43 +727,56 @@ def parse_insight_response(response_text: str) -> Dict[str, object]:
     direction_sentiment_raw = trading_insights_raw.get("direction_sentiment", {})
     if isinstance(direction_sentiment_raw, Mapping):
         direction_sentiment = {
-            "value": str(direction_sentiment_raw.get("value", "중립")).strip() or "중립",
+            "value": str(direction_sentiment_raw.get("value", "중립")).strip()
+            or "중립",
             "confidence": int(direction_sentiment_raw.get("confidence", 50) or 50),
             "rationale_keywords": [
-                str(kw).strip() for kw in direction_sentiment_raw.get("rationale_keywords", [])
+                str(kw).strip()
+                for kw in direction_sentiment_raw.get("rationale_keywords", [])
                 if str(kw).strip()
-            ][:3]  # 최대 3개
+            ][
+                :3
+            ],  # 최대 3개
         }
     else:
         # 하위 호환성: 문자열로 전달된 경우
         direction_sentiment = {
             "value": str(direction_sentiment_raw).strip() or "중립",
             "confidence": 50,
-            "rationale_keywords": []
+            "rationale_keywords": [],
         }
 
     # 변동성 심리 파싱
     volatility_sentiment_raw = trading_insights_raw.get("volatility_sentiment", {})
     if isinstance(volatility_sentiment_raw, Mapping):
         volatility_sentiment = {
-            "value": str(volatility_sentiment_raw.get("value", "안정")).strip() or "안정",
+            "value": str(volatility_sentiment_raw.get("value", "안정")).strip()
+            or "안정",
             "confidence": int(volatility_sentiment_raw.get("confidence", 50) or 50),
             "rationale_keywords": [
-                str(kw).strip() for kw in volatility_sentiment_raw.get("rationale_keywords", [])
+                str(kw).strip()
+                for kw in volatility_sentiment_raw.get("rationale_keywords", [])
                 if str(kw).strip()
-            ][:3]  # 최대 3개
+            ][
+                :3
+            ],  # 최대 3개
         }
     else:
         # 하위 호환성: 문자열로 전달된 경우
         volatility_sentiment = {
             "value": str(volatility_sentiment_raw).strip() or "안정",
             "confidence": 50,
-            "rationale_keywords": []
+            "rationale_keywords": [],
         }
 
     # 하위 호환성: 기존 market_sentiment 필드가 있는 경우
-    if "market_sentiment" in trading_insights_raw and "direction_sentiment" not in trading_insights_raw:
-        old_sentiment = str(trading_insights_raw.get("market_sentiment", "중립적")).strip()
+    if (
+        "market_sentiment" in trading_insights_raw
+        and "direction_sentiment" not in trading_insights_raw
+    ):
+        old_sentiment = str(
+            trading_insights_raw.get("market_sentiment", "중립적")
+        ).strip()
         # 기존 값을 방향성으로 매핑
         sentiment_mapping = {
             "긍정적": "상승",
@@ -750,17 +786,25 @@ def parse_insight_response(response_text: str) -> Dict[str, object]:
         direction_sentiment = {
             "value": sentiment_mapping.get(old_sentiment, "중립"),
             "confidence": 50,
-            "rationale_keywords": []
+            "rationale_keywords": [],
         }
 
-    normalized_opportunities = [str(item).strip() for item in opportunities if str(item).strip()] if isinstance(opportunities, list) else []
-    normalized_risks = [str(item).strip() for item in risks if str(item).strip()] if isinstance(risks, list) else []
+    normalized_opportunities = (
+        [str(item).strip() for item in opportunities if str(item).strip()]
+        if isinstance(opportunities, list)
+        else []
+    )
+    normalized_risks = (
+        [str(item).strip() for item in risks if str(item).strip()]
+        if isinstance(risks, list)
+        else []
+    )
 
     key_sources_raw = result.get("key_sources", [])
     if not isinstance(key_sources_raw, list):
         raise ValueError("'key_sources'는 리스트여야 합니다.")
 
-    normalized_sources: List[Dict[str, object]] = []
+    normalized_sources: list[dict[str, object]] = []
     for item in key_sources_raw:
         if not isinstance(item, Mapping):
             raise ValueError("각 key_sources 항목은 딕셔너리여야 합니다.")
@@ -781,7 +825,9 @@ def parse_insight_response(response_text: str) -> Dict[str, object]:
         normalized_sources.append(
             {
                 "title": title,
-                "url": str(url).strip() if isinstance(url, str) and url.strip() else None,
+                "url": (
+                    str(url).strip() if isinstance(url, str) and url.strip() else None
+                ),
                 "relevance": relevance,
             }
         )
@@ -800,11 +846,11 @@ def parse_insight_response(response_text: str) -> Dict[str, object]:
 
 def _sanitize_aggregated_keywords(
     aggregated_keywords: Sequence[Mapping[str, object]],
-    id_mapping: Optional[Dict[int, Dict[str, Any]]] = None,
-) -> List[Dict[str, object]]:
+    id_mapping: dict[int, dict[str, Any]] | None = None,
+) -> list[dict[str, object]]:
     """
     Insight 프롬프트에 포함할 키워드 정보를 정규화합니다.
-    
+
     evidence_ids를 원본 텍스트로 복원합니다 (프롬프트에 포함하기 위해).
 
     Args:
@@ -814,7 +860,7 @@ def _sanitize_aggregated_keywords(
     Returns:
         프롬프트에 포함할 정규화된 키워드 리스트.
     """
-    sanitized: List[Dict[str, object]] = []
+    sanitized: list[dict[str, object]] = []
 
     for index, keyword in enumerate(aggregated_keywords, start=1):
         term = str(keyword.get("term", "")).strip()
@@ -825,7 +871,9 @@ def _sanitize_aggregated_keywords(
         occurrence_count = int(keyword.get("occurrence_count", 1) or 1)
 
         original_variants = [
-            str(value).strip() for value in keyword.get("original_variants", []) if str(value).strip()
+            str(value).strip()
+            for value in keyword.get("original_variants", [])
+            if str(value).strip()
         ]
         unique_variants = list(dict.fromkeys([term, *original_variants]))
 
@@ -836,7 +884,7 @@ def _sanitize_aggregated_keywords(
                 f"[_sanitize_aggregated_keywords] 키워드 '{term}'에 'evidence' 필드가 있지만 "
                 f"'evidence_ids'가 없습니다. 'evidence' 필드는 무시됩니다."
             )
-        
+
         evidence_texts = []
         if id_mapping and evidence_ids:
             for evidence_id in evidence_ids[:3]:  # 최대 3개만
@@ -850,9 +898,11 @@ def _sanitize_aggregated_keywords(
                         f"[_sanitize_aggregated_keywords] 키워드 '{term}'의 evidence_id {evidence_id}가 "
                         f"ID 매핑에 없습니다. ID 매핑 통계: 총 레코드 수={len(id_mapping) if id_mapping else 'N/A'}"
                     )
-        
+
         sources_values = [
-            str(value).strip() for value in keyword.get("sources", []) if str(value).strip()
+            str(value).strip()
+            for value in keyword.get("sources", [])
+            if str(value).strip()
         ]
 
         sanitized.append(
@@ -876,7 +926,7 @@ def _build_source_highlights(
     *,
     max_sources: int,
     include_excerpts: bool,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     Insight 프롬프트에 포함할 핵심 출처 하이라이트를 구성합니다.
 
@@ -889,19 +939,19 @@ def _build_source_highlights(
     Returns:
         하이라이트 정보 리스트.
     """
-    keyword_to_score: Dict[str, float] = {
+    keyword_to_score: dict[str, float] = {
         str(keyword["term"]).lower(): float(keyword.get("score", 0.0))
         for keyword in keyword_payload
     }
 
-    variant_map: Dict[str, str] = {}
+    variant_map: dict[str, str] = {}
     for keyword in keyword_payload:
         canonical = str(keyword["term"]).strip()
         for variant in keyword.get("original_variants", []):
             variant_map[str(variant).strip().lower()] = canonical
         variant_map[canonical.lower()] = canonical
 
-    highlights: List[Dict[str, object]] = []
+    highlights: list[dict[str, object]] = []
 
     for record in raw_records:
         text = str(record.get("text", "") or "")
@@ -926,22 +976,21 @@ def _build_source_highlights(
         )
         lowered_content = combined_content.lower()
 
-        matched_terms: Dict[str, float] = {}
+        matched_terms: dict[str, float] = {}
         for variant_lower, canonical in variant_map.items():
             if variant_lower and variant_lower in lowered_content:
                 score = keyword_to_score.get(canonical.lower(), 0.0)
-                matched_terms[canonical] = matched_terms.get(canonical, 0.0) + max(score, 0.0)
+                matched_terms[canonical] = matched_terms.get(canonical, 0.0) + max(
+                    score, 0.0
+                )
 
         if not matched_terms:
             continue
 
         excerpt = text.strip()
-        if include_excerpts:
-            excerpt = excerpt[:400] if excerpt else ""
-        else:
-            excerpt = ""
+        excerpt = (excerpt[:400] if excerpt else "") if include_excerpts else ""
 
-        highlight_entry: Dict[str, object] = {
+        highlight_entry: dict[str, object] = {
             "title": title or channel or "Unknown source",
             "url": url or None,
             "timestamp": timestamp,
@@ -963,8 +1012,8 @@ def _build_source_highlights(
         reverse=True,
     )
 
-    unique_highlights: List[Dict[str, object]] = []
-    seen_keys: set[Tuple[str | None, str | None]] = set()
+    unique_highlights: list[dict[str, object]] = []
+    seen_keys: set[tuple[str | None, str | None]] = set()
     for entry in highlights:
         dedup_key = (entry.get("title"), entry.get("url"))
         if dedup_key in seen_keys:
@@ -982,10 +1031,11 @@ def _build_source_highlights(
 # 세분화된 내러티브 프롬프트 (Macro / Crypto Native / Crypto-Macro)
 # ============================================================================
 
+
 def build_macro_narrative_prompt(
-    keywords: List[Dict[str, Any]],
-    source_highlights: List[Dict[str, Any]],
-    economic_events: Optional[Sequence[Any]] = None
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
+    economic_events: Sequence[Any] | None = None,
 ) -> str:
     """
     Macro 내러티브 프롬프트를 생성합니다.
@@ -1007,7 +1057,9 @@ def build_macro_narrative_prompt(
     sources_json = json.dumps(source_highlights, ensure_ascii=False, indent=2)
 
     # Economic Calendar 과거/미래 분리
-    past_events_text, future_events_text = format_economic_calendar_split(economic_events)
+    past_events_text, future_events_text = format_economic_calendar_split(
+        economic_events
+    )
 
     system_prompt = (
         "당신은 거시경제 전문 분석가이자 현업 트레이더입니다.\n"
@@ -1038,14 +1090,12 @@ def build_macro_narrative_prompt(
     # Economic Calendar (과거/미래 분리)
     if past_events_text:
         user_prompt_parts.append(
-            "### 발표된 경제 지표 (과거)\n"
-            f"{past_events_text}\n\n"
+            "### 발표된 경제 지표 (과거)\n" f"{past_events_text}\n\n"
         )
 
     if future_events_text:
         user_prompt_parts.append(
-            "### 예정된 경제 지표 발표 일정 (미래)\n"
-            f"{future_events_text}\n\n"
+            "### 예정된 경제 지표 발표 일정 (미래)\n" f"{future_events_text}\n\n"
         )
 
     # ========================================
@@ -1055,73 +1105,58 @@ def build_macro_narrative_prompt(
         "---\n\n"
         "## 작성 가이드\n\n"
         "**반드시 2개 문단으로 작성**하세요. 각 문단의 구성은 다음과 같습니다:\n\n"
-
         "### 문단 1: 과거 이벤트 분석 (Past Analysis)\n\n"
         "**목적**: 발표된 경제 지표 및 각종 이벤트에 따른 반응을 분석합니다.\n\n"
-
         "**필수 포함 요소**:\n"
         "1. 발표된 주요 경제 지표 요약\n"
         "   - 실제 발표값 vs 시장 예상치 비교\n"
         "   - 이전 수치 대비 변화\n"
         "   - 주요 이벤트 내용 요약 및 시장 반응\n"
-        "   - 예: \"미국 11월 CPI는 2.7%(예상 2.6%)로 예상을 상회했으며, 이전 2.6% 대비 0.1%p 상승\"\n\n"
-
+        '   - 예: "미국 11월 CPI는 2.7%(예상 2.6%)로 예상을 상회했으며, 이전 2.6% 대비 0.1%p 상승"\n\n'
         "2. 각 시장의 반응\n"
         "   - 금리: 국채 수익률, 정책금리 전망 변화\n"
         "   - 주식: 주요 지수 등락률 및 섹터별 영향\n"
         "   - 환율: 달러지수, 주요 통화쌍 변동\n"
         "   - Commodity: 금, 원유 등 주요 상품 가격\n"
-        "   - 예: \"10년물 국채 수익률은 4.2%로 10bp 상승하며 금리 인하 기대 후퇴를 반영\"\n\n"
-
+        '   - 예: "10년물 국채 수익률은 4.2%로 10bp 상승하며 금리 인하 기대 후퇴를 반영"\n\n'
         "3. 시장 간 상호작용 분석\n"
         "   - 금리 상승 → 주식 하락 압력\n"
         "   - 달러 강세 → 신흥국 통화 약세\n"
         "   - 인플레이션 우려 → 금 가격 상승\n"
         "   - 각 연결고리의 인과관계 명확히 서술\n\n"
-
         "4. 긍정/부정 요인 종합 평가\n"
         "   - 긍정 요인: (예: 고용 지표 호조, 금리 인하 기대)\n"
         "   - 부정 요인: (예: 인플레이션 재가속, 금리 인상 압력)\n"
         "   - 최종 평가: 어느 요인이 우세했는지 명시\n\n"
-
         "**작성 규칙**:\n"
         "- 길이: 200~400자\n"
         "- 정량적 데이터 최소 3개 이상 포함 (%, bp, 지수 등)\n"
         "- 인과관계 명확: A → B → C 형태로 전달 경로 서술\n"
         "- 방향성 정확: 매파↔비둘기파, 강세↔약세, 상승↔하락 혼동 금지\n\n"
-
         "---\n\n"
-
         "### 문단 2: 미래 이벤트 전망 (Future Outlook)\n\n"
         "**목적**: 예정된 경제 지표 발표 일정과 시장 기대치를 바탕으로 시장 영향을 전망합니다.\n\n"
-
         "**필수 포함 요소**:\n"
         "1. 예정된 주요 경제 지표 일정\n"
         "   - 발표 예정일 및 지표명\n"
         "   - 시장 기대치 (컨센서스)\n"
         "   - 이전 수치 참고\n"
-
         "2. 시장 기대치 및 컨센서스\n"
         "   - 주요 기관/애널리스트 전망\n"
         "   - 시장이 가격에 반영한 수준\n"
-
         "3. 시나리오별 시장 영향 예측 (정량적)\n"
         "   - 기대치 충족 시: 예상되는 시장 반응\n"
         "   - 기대치 상회 시: 긍정적 시나리오 (구체적 수치로 표현)\n"
         "   - 기대치 하회 시: 부정적 시나리오 (구체적 수치로 표현)\n"
-
         "4. 투자 시사점\n"
         "   - 주목해야 할 핵심 변수\n"
         "   - 리스크 요인\n"
         "   - 포지셔닝 방향 (간접적 제안)\n"
-
         "**작성 규칙**:\n"
         "- 길이: 200~400자\n"
         "- 불확실성 표현 사용: '~할 가능성', '~로 예상됨', '~할 경우' 등\n"
         "- 시나리오별 정량적 영향 명시: '2~3% 상승', '10bp 하락' 등\n"
         "- 근거 명확히 제시: '과거 유사 사례', 'Fed Funds Futures 기준' 등\n"
-
-
         "### 문단 3: 내용 정리 및 인사이트 제공\n\n"
         "**목적**: 예정된 경제 지표 발표 일정과 시장 기대치를 바탕으로 시장 영향을 전망합니다.\n\n"
     )
@@ -1132,7 +1167,6 @@ def build_macro_narrative_prompt(
     user_prompt_parts.append(
         "---\n\n"
         "## 공통 작성 원칙\n\n"
-
         "### 인과관계 작성 시 주의사항\n"
         "- ✅ 원인과 결과를 논리적으로 연결: 'A로 인해 B 발생', 'A가 B를 견인'\n"
         "- ✅ 각 단계의 전달 경로 명확히: A → B → C\n"
@@ -1143,18 +1177,15 @@ def build_macro_narrative_prompt(
         "  • 금리 인상 → 달러 강세, 금리 인하 → 달러 약세\n"
         "  • 강세/약세, 상승/하락, 우려/기대 등 반대 의미 용어 혼동 금지\n"
         "- ✅ 불확실한 인과관계는 단정 금지: '~할 가능성', '~로 해석됨' 등으로 표현\n\n"
-
         "### 긍정/부정 요인 구분\n"
         "상반된 요인이 있다면 명확히 구분하여 서술:\n"
         "- 긍정적 요인(금리 하락, 주가 상승 압력): ...\n"
         "- 부정적 요인(금리 상승, 주가 하락 압력): ...\n"
         "- 최종 결과: 어느 쪽 압력이 우세했는지 명시\n\n"
-
         "### 근거 및 데이터\n"
         "- 정량적 데이터 필수 포함 (%, bp, 지수, 금액 등)\n"
         "- 출처 명시 (Fed, Bloomberg, ECB 등)\n"
         "- 과거 유사 사례 참조 가능\n\n"
-
         "### 팩트 체크 (중요)\n"
         "- **예정된 경제 지표 일정은 반드시 제공된 Economic Calendar 데이터에서만 인용**하세요\n"
         "- 제공된 데이터에 없는 일정을 추측하거나 만들어내지 마세요\n"
@@ -1188,10 +1219,10 @@ def build_macro_narrative_prompt(
 
 
 def build_crypto_narrative_prompt(
-    keywords: List[Dict[str, Any]],
-    source_highlights: List[Dict[str, Any]],
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
     num_paragraphs: int = 2,
-    economic_events: Optional[Sequence[Any]] = None
+    economic_events: Sequence[Any] | None = None,
 ) -> str:
     """
     Crypto 내러티브 프롬프트를 생성합니다.
@@ -1256,72 +1287,58 @@ def build_crypto_narrative_prompt(
         "---\n\n"
         "## 작성 가이드\n\n"
         "**반드시 2개 문단으로 작성**하세요. 각 문단의 구성은 다음과 같습니다:\n\n"
-
         "### 문단 1: 과거 이벤트 분석 (Past Analysis)\n\n"
         "**목적**: 발생한 암호화폐 시장 이벤트와 시장 반응을 분석합니다.\n\n"
-
         "**필수 포함 요소**:\n"
         "1. 핵심 성장/하락 동력 분석\n"
         "   - 온체인 트렌드: L2 경쟁, DeFi TVL 변동, 프로토콜 업데이트\n"
         "   - 제도권 동향: ETF 자금 흐름, 기관 투자, 규제 변화\n"
         "   - 정량적 근거 필수: TVL(%), 거래량, ETF 순유입/유출 금액\n"
-        "   - 예: \"비트코인 현물 ETF에서 3억 달러 순유입, Arbitrum TVL 15% 증가\"\n\n"
-
+        '   - 예: "비트코인 현물 ETF에서 3억 달러 순유입, Arbitrum TVL 15% 증가"\n\n'
         "2. 주요 이벤트 요약\n"
         "   - 온체인: 프로토콜 업데이트, 에어드롭, 메인넷 런칭, 해킹 사고\n"
         "   - 제도권: ETF 승인/거부, SEC 소송, 기관 투자 발표, 규제 법안\n"
         "   - 각 이벤트가 BTC/ETH 등 주요 코인에 미친 영향\n"
-        "   - 예: \"SEC의 이더리움 ETF 승인으로 ETH 10% 급등\"\n\n"
-
+        '   - 예: "SEC의 이더리움 ETF 승인으로 ETH 10% 급등"\n\n'
         "3. 시장 반응 분석\n"
         "   - 가격 변동: 주요 코인 및 알트코인의 등락률\n"
         "   - 거래량 변화: 온체인 거래량, CEX/DEX 거래량\n"
         "   - 자금 흐름: ETF 자금 흐름, DeFi TVL 변동, 거래소 입출금\n"
-        "   - 예: \"비트코인 $95,000 돌파, 24시간 거래량 400억 달러\"\n\n"
-
+        '   - 예: "비트코인 $95,000 돌파, 24시간 거래량 400억 달러"\n\n'
         "4. 인과관계 분석\n"
         "   - 온체인: 업그레이드 → TVL 증가 → 토큰 가격 상승\n"
         "   - 제도권: ETF 승인 → 기관 자금 유입 → 시장 상승\n"
         "   - 규제: SEC 소송 → 불확실성 증가 → 매도 압력\n\n"
-
         "5. 긍정/부정 요인 종합 평가\n"
         "   - 긍정 요인: ETF 승인, TVL 급증, 기관 진입, 프로토콜 성공\n"
         "   - 부정 요인: 규제 압박, 해킹, ETF 자금 유출, 기술적 실패\n"
         "   - 최종 평가: 어느 요인이 우세했는지 명시\n\n"
-
         "**작성 규칙**:\n"
         "- 길이: 200~400자\n"
         "- 정량적 데이터 최소 3개 이상 포함\n"
         "- 인과관계 명확: A → B → C 형태로 전달 경로 서술\n"
         "- 온체인 + 제도권 양쪽 동향을 균형있게 다룰 것\n\n"
-
         "---\n\n"
-
         "### 문단 2: 미래 트렌드 전망 (Future Outlook)\n\n"
         "**목적**: 예정된 이벤트와 시장 기대치를 분석합니다.\n\n"
-
         "**필수 포함 요소**:\n"
         "1. 예정된 주요 이벤트\n"
         "   - 온체인: 프로토콜 업그레이드, 토큰 언락, 에어드롭, 메인넷 출시\n"
         "   - 제도권: ETF 결정 일정, 규제 청문회, 기관 투자 발표 예정\n"
-        "   - 예: \"이더리움 Pectra 업그레이드 예정, SEC 스테이킹 ETF 심사 중\"\n\n"
-
+        '   - 예: "이더리움 Pectra 업그레이드 예정, SEC 스테이킹 ETF 심사 중"\n\n'
         "2. 시장 기대치 및 컨센서스\n"
         "   - 주요 분석가 전망 (온체인 애널리스트, 기관 리서치)\n"
         "   - 커뮤니티 기대 수준\n"
-        "   - 예: \"시장은 스팟 ETH ETF 승인으로 20억 달러 자금 유입 기대\"\n\n"
-
+        '   - 예: "시장은 스팟 ETH ETF 승인으로 20억 달러 자금 유입 기대"\n\n'
         "3. 시나리오별 시장 영향 예측\n"
         "   - 기대치 충족 시: 예상되는 가격/TVL 변화\n"
         "   - 기대치 상회 시: 긍정적 시나리오\n"
         "   - 기대치 하회 시: 부정적 시나리오 (규제 불확실성, 기술적 실패)\n"
-        "   - 예: \"ETF 승인 시 BTC $100K 도달 가능, 거부 시 $80K 지지선 테스트\"\n\n"
-
+        '   - 예: "ETF 승인 시 BTC $100K 도달 가능, 거부 시 $80K 지지선 테스트"\n\n'
         "4. 투자 시사점\n"
         "   - 주목해야 할 테마/섹터 (L2, RWA, AI 크립토, ETF 수혜주)\n"
         "   - 리스크 요인 (규제, 기술적 리스크, 유동성)\n"
         "   - 포지셔닝 방향 (간접적 제안)\n\n"
-
         "**작성 규칙**:\n"
         "- 길이: 200~400자\n"
         "- 불확실성 표현 사용: '~할 가능성', '~로 예상됨'\n"
@@ -1335,7 +1352,6 @@ def build_crypto_narrative_prompt(
     user_prompt_parts.append(
         "---\n\n"
         "## 공통 작성 원칙\n\n"
-
         "### 인과관계 작성 시 주의사항\n"
         "- ✅ 원인과 결과를 논리적으로 연결\n"
         "- ✅ 각 단계의 전달 경로 명확히: ETF 승인 → 기관 자금 유입 → 가격 상승\n"
@@ -1345,7 +1361,6 @@ def build_crypto_narrative_prompt(
         "  • 추상적 표현 대신 정량적 데이터\n"
         "- ✅ 긍정/부정 요인 명확히 구분\n"
         "- ✅ 불확실한 인과관계는 단정 금지\n\n"
-
         "### 온체인 vs 제도권 균형\n"
         "- 두 영역의 동향을 균형있게 다룰 것\n"
         "- 상호 연결점 강조: 예) ETF 자금 유입 → 온체인 활동 증가\n"
@@ -1379,35 +1394,39 @@ def build_crypto_narrative_prompt(
 
 # 하위 호환성을 위한 별칭 (deprecated)
 def build_crypto_native_narrative_prompt(
-    keywords: List[Dict[str, Any]],
-    source_highlights: List[Dict[str, Any]],
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
     num_paragraphs: int = 2,
-    economic_events: Optional[Sequence[Any]] = None
+    economic_events: Sequence[Any] | None = None,
 ) -> str:
     """Deprecated: build_crypto_narrative_prompt를 사용하세요."""
-    return build_crypto_narrative_prompt(keywords, source_highlights, num_paragraphs, economic_events)
+    return build_crypto_narrative_prompt(
+        keywords, source_highlights, num_paragraphs, economic_events
+    )
 
 
 # 하위 호환성을 위한 별칭 (deprecated)
 def build_crypto_macro_narrative_prompt(
-    keywords: List[Dict[str, Any]],
-    source_highlights: List[Dict[str, Any]],
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
     num_paragraphs: int = 2,
-    economic_events: Optional[Sequence[Any]] = None
+    economic_events: Sequence[Any] | None = None,
 ) -> str:
     """Deprecated: build_crypto_narrative_prompt를 사용하세요."""
-    return build_crypto_narrative_prompt(keywords, source_highlights, num_paragraphs, economic_events)
+    return build_crypto_narrative_prompt(
+        keywords, source_highlights, num_paragraphs, economic_events
+    )
 
 
 def build_integrated_narrative_prompt(
-    macro_narrative: List[str],
-    crypto_narrative: List[str],
-    all_keywords: List[Dict[str, Any]],
+    macro_narrative: list[str],
+    crypto_narrative: list[str],
+    all_keywords: list[dict[str, Any]],
     num_paragraphs: int = 3,
-    economic_events: Optional[Sequence[Any]] = None,
+    economic_events: Sequence[Any] | None = None,
     # 하위 호환성을 위한 deprecated 파라미터
-    crypto_native_narrative: List[str] = None,
-    crypto_macro_narrative: List[str] = None
+    crypto_native_narrative: list[str] = None,
+    crypto_macro_narrative: list[str] = None,
 ) -> str:
     """
     통합 내러티브 프롬프트를 생성합니다.
@@ -1438,7 +1457,9 @@ def build_integrated_narrative_prompt(
             combined_crypto.extend(crypto_macro_narrative)
         crypto_narrative = combined_crypto if combined_crypto else crypto_narrative
 
-    keywords_json = json.dumps(all_keywords[:15], ensure_ascii=False, indent=2)  # 상위 15개만
+    keywords_json = json.dumps(
+        all_keywords[:15], ensure_ascii=False, indent=2
+    )  # 상위 15개만
 
     system_prompt = (
         "당신은 디지털 자산 시장 전체를 조망하는 수석 분석가입니다.\n"
@@ -1466,43 +1487,35 @@ def build_integrated_narrative_prompt(
 
     # Economic Calendar 추가 (있을 경우)
     if economic_calendar_text:
-        user_prompt_parts.append(
-            f"{economic_calendar_text}\n\n"
-        )
+        user_prompt_parts.append(f"{economic_calendar_text}\n\n")
 
     user_prompt_parts.append(
         "---\n\n"
         "## 작성 가이드\n\n"
         f"**반드시 {num_paragraphs}개 문단으로 작성**하세요.\n\n"
-
         "### 통합 내러티브의 목적\n"
         "- 단순 요약이 아닌 **두 내러티브 간의 연결고리**를 찾아 새로운 인사이트 도출\n"
         "- 거시경제 → 암호화폐 시장으로의 **전달 경로** 명확화\n"
         "- 투자자 관점에서 **실행 가능한 시사점** 제시\n\n"
-
         "### 필수 포함 요소\n"
         "1. **Macro-Crypto 연결고리**\n"
         "   - 금리/인플레이션이 암호화폐 시장에 미치는 영향\n"
         "   - 달러 강세/약세와 비트코인 가격의 상관관계\n"
         "   - 위험자산 선호도 변화가 크립토에 미치는 영향\n"
-        "   - 예: \"금리 인하 기대감 → 위험자산 선호 → ETF 자금 유입 → BTC 상승\"\n\n"
-
+        '   - 예: "금리 인하 기대감 → 위험자산 선호 → ETF 자금 유입 → BTC 상승"\n\n'
         "2. **종합 시장 전망**\n"
         "   - 거시경제와 암호화폐 양쪽 요인을 고려한 시장 방향성\n"
         "   - 긍정/부정 요인의 상대적 힘 평가\n"
         "   - 단기 vs 중장기 전망 구분\n\n"
-
         "3. **투자 시사점**\n"
         "   - 현 환경에서 주목할 테마/섹터\n"
         "   - 리스크 요인과 대응 방안\n"
         "   - 포지셔닝 방향 (간접적 제안)\n\n"
-
         "### 작성 규칙\n"
         "- 각 문단 길이: 150~250자\n"
         "- 정량적 데이터 인용 (금리, %, TVL, ETF 자금 등)\n"
         "- 인과관계 명확: A → B → C 형태로 전달 경로 서술\n"
         "- 단순 나열 금지: 두 내러티브를 연결하는 새로운 관점 필수\n\n"
-
         "---\n\n"
         "## 출력 형식\n\n"
         "반드시 다음 JSON 형식으로만 출력하세요:\n\n"
@@ -1521,7 +1534,7 @@ def build_integrated_narrative_prompt(
     return f"{system_prompt}\n\n{user_prompt}"
 
 
-def parse_narrative_response(response_text: str, category: str) -> List[str]:
+def parse_narrative_response(response_text: str, category: str) -> list[str]:
     """
     카테고리별 내러티브 응답을 파싱합니다.
 
@@ -1535,7 +1548,9 @@ def parse_narrative_response(response_text: str, category: str) -> List[str]:
     Raises:
         ValueError: 응답 구조가 예상과 다를 때
     """
-    result = parse_json_from_llm_response(response_text, context=f"{category} Narrative 응답")
+    result = parse_json_from_llm_response(
+        response_text, context=f"{category} Narrative 응답"
+    )
 
     if "narrative" not in result:
         raise ValueError(f"{category} Narrative 응답에 'narrative' 필드가 없습니다.")
@@ -1544,14 +1559,16 @@ def parse_narrative_response(response_text: str, category: str) -> List[str]:
     if not isinstance(narrative, list) or not narrative:
         raise ValueError(f"'{category} narrative'는 비어있지 않은 리스트여야 합니다.")
 
-    normalized_narrative = [str(paragraph).strip() for paragraph in narrative if str(paragraph).strip()]
+    normalized_narrative = [
+        str(paragraph).strip() for paragraph in narrative if str(paragraph).strip()
+    ]
     if not normalized_narrative:
         raise ValueError(f"'{category} narrative'에 유효한 문단이 없습니다.")
 
     return normalized_narrative
 
 
-def format_economic_calendar(economic_events: Optional[Sequence[Any]] = None) -> str:
+def format_economic_calendar(economic_events: Sequence[Any] | None = None) -> str:
     """
     Economic Calendar 이벤트를 프롬프트용 텍스트로 포맷팅합니다.
 
@@ -1572,7 +1589,7 @@ def format_economic_calendar(economic_events: Optional[Sequence[Any]] = None) ->
     future_events = []
 
     for event in economic_events:
-        timestamp = getattr(event, 'timestamp', None)
+        timestamp = getattr(event, "timestamp", None)
         if timestamp:
             if timestamp <= now:
                 past_events.append(event)
@@ -1585,7 +1602,7 @@ def format_economic_calendar(economic_events: Optional[Sequence[Any]] = None) ->
     if past_events:
         lines.append("**[발표된 경제 지표]**")
         for event in past_events[:10]:  # 최대 10개
-            text = getattr(event, 'text', '')
+            text = getattr(event, "text", "")
             if text:
                 lines.append(f"▪ {text}")
 
@@ -1595,14 +1612,16 @@ def format_economic_calendar(economic_events: Optional[Sequence[Any]] = None) ->
             lines.append("")
         lines.append("**[예정된 경제 지표 발표 일정]**")
         for event in future_events[:10]:  # 최대 10개
-            text = getattr(event, 'text', '')
+            text = getattr(event, "text", "")
             if text:
                 lines.append(f"▪ {text}")
 
     return "\n".join(lines) if lines else ""
 
 
-def format_economic_calendar_split(economic_events: Optional[Sequence[Any]] = None) -> tuple[str, str]:
+def format_economic_calendar_split(
+    economic_events: Sequence[Any] | None = None,
+) -> tuple[str, str]:
     """
     Economic Calendar 이벤트를 과거/미래로 분리하여 포맷팅합니다.
 
@@ -1623,7 +1642,7 @@ def format_economic_calendar_split(economic_events: Optional[Sequence[Any]] = No
     future_events = []
 
     for event in economic_events:
-        timestamp = getattr(event, 'timestamp', None)
+        timestamp = getattr(event, "timestamp", None)
         if timestamp:
             if timestamp <= now:
                 past_events.append(event)
@@ -1634,7 +1653,7 @@ def format_economic_calendar_split(economic_events: Optional[Sequence[Any]] = No
     past_lines = []
     if past_events:
         for event in past_events[:10]:  # 최대 10개
-            text = getattr(event, 'text', '')
+            text = getattr(event, "text", "")
             if text:
                 past_lines.append(f"▪ {text}")
 
@@ -1642,7 +1661,7 @@ def format_economic_calendar_split(economic_events: Optional[Sequence[Any]] = No
     future_lines = []
     if future_events:
         for event in future_events[:10]:  # 최대 10개
-            text = getattr(event, 'text', '')
+            text = getattr(event, "text", "")
             if text:
                 future_lines.append(f"▪ {text}")
 

@@ -12,9 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Dict, List, MutableMapping, Optional, Sequence
+from collections.abc import MutableMapping, Sequence
 
 import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,9 @@ async def generate_keyword_embeddings(
     texts: Sequence[str],
     *,
     provider: str = "gemini",
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
-    task_type: Optional[str] = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    task_type: str | None = None,
     concurrency_limit: int = 4,
     normalize: bool = True,
 ) -> np.ndarray:
@@ -138,7 +139,7 @@ async def generate_keyword_embeddings(
 async def _generate_with_gemini(
     *,
     texts: Sequence[str],
-    api_key: Optional[str],
+    api_key: str | None,
     model: str,
     task_type: str,
     concurrency_limit: int,
@@ -161,9 +162,13 @@ async def _generate_with_gemini(
             "langchain-google-genai 패키지가 설치되어 있지 않아 Gemini 임베딩을 사용할 수 없습니다."
         )
 
-    resolved_api_key = api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    resolved_api_key = (
+        api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    )
     if not resolved_api_key:
-        raise RuntimeError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경변수가 설정되어 있지 않습니다.")
+        raise RuntimeError(
+            "GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경변수가 설정되어 있지 않습니다."
+        )
 
     logger.debug(
         "[EmbeddingCluster] Gemini 임베딩 호출: model=%s, task_type=%s, concurrency_limit=%d, text_count=%d",
@@ -179,7 +184,7 @@ async def _generate_with_gemini(
         google_api_key=resolved_api_key,
     )
 
-    def _embed() -> List[List[float]]:
+    def _embed() -> list[list[float]]:
         return embedder.embed_documents(list(texts))
 
     vectors = await asyncio.to_thread(_embed)
@@ -190,7 +195,7 @@ async def _generate_with_gemini(
 async def _generate_with_openai(
     *,
     texts: Sequence[str],
-    api_key: Optional[str],
+    api_key: str | None,
     model: str,
 ) -> np.ndarray:
     """
@@ -224,7 +229,7 @@ async def _generate_with_openai(
         openai_api_key=resolved_api_key,
     )
 
-    def _embed() -> List[List[float]]:
+    def _embed() -> list[list[float]]:
         return embedder.embed_documents(list(texts))
 
     vectors = await asyncio.to_thread(_embed)
@@ -248,9 +253,13 @@ async def _generate_with_keybert(
         NumPy 배열 형태의 임베딩 결과.
     """
     if not KEYBERT_AVAILABLE:
-        raise RuntimeError("KeyBERT 패키지가 설치되어 있지 않습니다. provider='gemini'를 사용하세요.")
+        raise RuntimeError(
+            "KeyBERT 패키지가 설치되어 있지 않습니다. provider='gemini'를 사용하세요."
+        )
 
-    logger.info("[EmbeddingCluster] KeyBERT 임베딩 생성 시작 (text_count=%d)", len(texts))
+    logger.info(
+        "[EmbeddingCluster] KeyBERT 임베딩 생성 시작 (text_count=%d)", len(texts)
+    )
 
     kw_model = KeyBERT()
 
@@ -275,12 +284,12 @@ async def cluster_keywords_by_embedding(
     similarity_threshold: float = 0.85,
     min_cluster_size: int = 1,
     provider: str = "gemini",
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
-    task_type: Optional[str] = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    task_type: str | None = None,
     concurrency_limit: int = 4,
     normalize_embeddings: bool = True,
-) -> List[MutableMapping[str, object]]:
+) -> list[MutableMapping[str, object]]:
     """
     DBSCAN을 사용해 키워드를 임베딩 기반으로 클러스터링합니다.
 
@@ -304,7 +313,9 @@ async def cluster_keywords_by_embedding(
     if not keywords:
         raise ValueError("클러스터링할 키워드가 비어 있습니다.")
 
-    missing_term = [kw for kw in keywords if "term" not in kw or not str(kw["term"]).strip()]
+    missing_term = [
+        kw for kw in keywords if "term" not in kw or not str(kw["term"]).strip()
+    ]
     if missing_term:
         raise ValueError("모든 키워드는 'term' 필드를 포함해야 합니다.")
 
@@ -357,13 +368,13 @@ async def cluster_keywords_by_embedding(
         cluster_labels.tolist(),
     )
 
-    label_to_members: dict[int, List[str]] = {}
+    label_to_members: dict[int, list[str]] = {}
     for index, label in enumerate(cluster_labels):
         label_to_members.setdefault(int(label), []).append(keyword_terms[index])
 
     logger.debug("[EmbeddingCluster] 클러스터 구성: %s", label_to_members)
 
-    enriched_keywords: List[MutableMapping[str, object]] = []
+    enriched_keywords: list[MutableMapping[str, object]] = []
     for index, keyword in enumerate(keywords):
         label = int(cluster_labels[index])
         members = label_to_members[label]
@@ -374,7 +385,9 @@ async def cluster_keywords_by_embedding(
 
         enriched_keywords.append(keyword_copy)
 
-    logger.info("[EmbeddingCluster] 클러스터링 완료: cluster_count=%d", len(label_to_members))
+    logger.info(
+        "[EmbeddingCluster] 클러스터링 완료: cluster_count=%d", len(label_to_members)
+    )
 
     return enriched_keywords
 
@@ -386,7 +399,7 @@ def aggregate_clustered_keywords(
     source_weight: float = 0.1,
     occurrence_weight: float = 0.05,
     evidence_weight: float = 0.02,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     클러스터링된 키워드 목록을 그룹별로 통합하고 메타데이터를 계산합니다.
 
@@ -413,7 +426,7 @@ def aggregate_clustered_keywords(
         len(clustered_keywords),
     )
 
-    cluster_groups: Dict[int, List[MutableMapping[str, object]]] = {}
+    cluster_groups: dict[int, list[MutableMapping[str, object]]] = {}
 
     for keyword in clustered_keywords:
         cluster_id = int(keyword["cluster_id"])
@@ -421,7 +434,7 @@ def aggregate_clustered_keywords(
 
     logger.debug("[EmbeddingCluster] 클러스터 그룹핑 결과: %s", cluster_groups.keys())
 
-    aggregated_keywords: List[Dict[str, object]] = []
+    aggregated_keywords: list[dict[str, object]] = []
 
     for cluster_id, keywords_in_cluster in cluster_groups.items():
         if len(keywords_in_cluster) == 1:
@@ -434,8 +447,10 @@ def aggregate_clustered_keywords(
                     f"[aggregate_clustered_keywords] 키워드 '{keyword.get('term')}'에 'evidence' 필드가 있지만 "
                     f"'evidence_ids'가 없습니다. 'evidence' 필드는 무시됩니다."
                 )
-            evidence_ids = evidence_ids[:evidence_limit] if isinstance(evidence_ids, list) else []
-            
+            evidence_ids = (
+                evidence_ids[:evidence_limit] if isinstance(evidence_ids, list) else []
+            )
+
             sources_values = list(keyword.get("sources", []))
 
             aggregated_keywords.append(
@@ -461,8 +476,8 @@ def aggregate_clustered_keywords(
         all_terms = [str(item["term"]) for item in keywords_in_cluster]
         all_scores = [float(item.get("score", 0.0)) for item in keywords_in_cluster]
 
-        all_evidence_ids: List[int] = []
-        all_sources: List[str] = []
+        all_evidence_ids: list[int] = []
+        all_sources: list[str] = []
 
         for item in keywords_in_cluster:
             # evidence_ids 처리 (evidence 필드는 무시)
@@ -472,12 +487,15 @@ def aggregate_clustered_keywords(
                     f"[aggregate_clustered_keywords] 클러스터 {cluster_id}의 키워드에 'evidence' 필드가 있지만 "
                     f"'evidence_ids'가 없습니다. 'evidence' 필드는 무시됩니다."
                 )
-            
+
             if isinstance(evidence_ids, list):
                 for evidence_id in evidence_ids:
-                    if isinstance(evidence_id, int) and evidence_id not in all_evidence_ids:
+                    if (
+                        isinstance(evidence_id, int)
+                        and evidence_id not in all_evidence_ids
+                    ):
                         all_evidence_ids.append(evidence_id)
-            
+
             all_sources.extend(list(item.get("sources", [])))
 
         unique_sources = sorted(set(all_sources))
@@ -537,7 +555,7 @@ def recalculate_cluster_scores(
     occurrence_weight: float = 0.05,
     evidence_weight: float = 0.02,
     max_evidence_bonus: int = 3,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     클러스터 통합 결과에 가중치를 적용하여 최종 점수를 재계산합니다.
 
@@ -559,20 +577,25 @@ def recalculate_cluster_scores(
         len(aggregated_keywords),
     )
 
-    recalculated: List[Dict[str, object]] = []
+    recalculated: list[dict[str, object]] = []
 
     for keyword in aggregated_keywords:
-        score_components = keyword.get("score_components", {}) if isinstance(keyword, MutableMapping) else {}
+        score_components = (
+            keyword.get("score_components", {})
+            if isinstance(keyword, MutableMapping)
+            else {}
+        )
         raw_scores = score_components.get("raw_scores") or [keyword.get("score", 0.0)]
         raw_scores = [float(value) for value in raw_scores if value is not None]
 
-        if not raw_scores:
-            base_mean = 0.0
-        else:
-            base_mean = float(np.mean(raw_scores))
+        base_mean = 0.0 if not raw_scores else float(np.mean(raw_scores))
 
-        source_count = int(score_components.get("source_count", len(set(keyword.get("sources", [])))))
-        occurrence_count = int(score_components.get("occurrence_count", keyword.get("occurrence_count", 1)))
+        source_count = int(
+            score_components.get("source_count", len(set(keyword.get("sources", []))))
+        )
+        occurrence_count = int(
+            score_components.get("occurrence_count", keyword.get("occurrence_count", 1))
+        )
         # evidence_ids 개수 계산
         evidence_ids = keyword.get("evidence_ids", [])
         if not evidence_ids and "evidence" in keyword:
@@ -580,7 +603,12 @@ def recalculate_cluster_scores(
                 f"[_recalculate_scores] 키워드 '{keyword.get('term')}'에 'evidence' 필드가 있지만 "
                 f"'evidence_ids'가 없습니다. 'evidence' 필드는 무시됩니다."
             )
-        evidence_count = int(score_components.get("evidence_count", len(evidence_ids) if isinstance(evidence_ids, list) else 0))
+        evidence_count = int(
+            score_components.get(
+                "evidence_count",
+                len(evidence_ids) if isinstance(evidence_ids, list) else 0,
+            )
+        )
         evidence_count = min(evidence_count, max_evidence_bonus)
 
         source_factor = 1.0 + (source_count * source_weight)
@@ -600,7 +628,7 @@ def recalculate_cluster_scores(
             "evidence_factor": evidence_factor,
         }
 
-        updated_keyword: Dict[str, object] = dict(keyword)
+        updated_keyword: dict[str, object] = dict(keyword)
         updated_keyword["score"] = final_score
         updated_keyword["score_breakdown"] = score_breakdown
 
@@ -646,5 +674,3 @@ def _l2_normalize(vectors: np.ndarray) -> np.ndarray:
     norms[norms == 0] = 1.0
 
     return vectors / norms
-
-

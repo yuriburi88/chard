@@ -8,10 +8,11 @@ LangGraph 노드 모듈
 - InsightNode: 내러티브 요약 및 거래 인사이트 생성
 """
 
-from src.workflows.nodes.collector_node import collector_node
-from src.workflows.nodes.keyword_extractor_node import keyword_extractor_node
 from src.workflows.nodes.aggregator_node import aggregator_node
+from src.workflows.nodes.collector_node import collector_node
 from src.workflows.nodes.insight_node import insight_node
+from src.workflows.nodes.keyword_extractor_node import keyword_extractor_node
+
 
 __all__ = [
     "collector_node",
@@ -19,4 +20,3 @@ __all__ = [
     "aggregator_node",
     "insight_node",
 ]
-

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ def merge_llm_groups_with_keywords(
     *,
     top_n: int | None = None,
     evidence_limit: int = 3,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     LLM 검증 결과를 기존 후보 키워드 구조에 병합합니다.
 
@@ -54,11 +55,13 @@ def merge_llm_groups_with_keywords(
         len(standalone_terms),
     )
 
-    merged_keywords: List[Dict[str, object]] = []
+    merged_keywords: list[dict[str, object]] = []
     processed_terms: set[str] = set()
 
     for group in groups:
-        merged_entry = _merge_group(group, normalized_candidates.values(), evidence_limit)
+        merged_entry = _merge_group(
+            group, normalized_candidates.values(), evidence_limit
+        )
 
         if not merged_entry:
             continue
@@ -93,11 +96,11 @@ def merge_llm_groups_with_keywords(
 
 def _normalize_candidates(
     candidates: Sequence[Mapping[str, object]],
-) -> Dict[str, Dict[str, object]]:
+) -> dict[str, dict[str, object]]:
     """
     후보 키워드를 용어 기준 딕셔너리로 정규화합니다.
     """
-    normalized: Dict[str, Dict[str, object]] = {}
+    normalized: dict[str, dict[str, object]] = {}
 
     for item in candidates:
         term = str(item.get("term", "")).strip()
@@ -115,7 +118,9 @@ def _normalize_candidates(
     return normalized
 
 
-def _safe_get_groups(llm_result: Mapping[str, object] | None) -> List[Mapping[str, object]]:
+def _safe_get_groups(
+    llm_result: Mapping[str, object] | None,
+) -> list[Mapping[str, object]]:
     """
     LLM 응답에서 그룹 정보를 안전하게 추출합니다.
     """
@@ -130,7 +135,7 @@ def _safe_get_groups(llm_result: Mapping[str, object] | None) -> List[Mapping[st
     return [group for group in groups if isinstance(group, Mapping)]
 
 
-def _safe_get_standalone(llm_result: Mapping[str, object] | None) -> List[str]:
+def _safe_get_standalone(llm_result: Mapping[str, object] | None) -> list[str]:
     """
     LLM 응답에서 standalone 용어를 추출합니다.
     """
@@ -142,7 +147,7 @@ def _safe_get_standalone(llm_result: Mapping[str, object] | None) -> List[str]:
     if not isinstance(entries, Iterable):
         return []
 
-    normalized: List[str] = []
+    normalized: list[str] = []
 
     for entry in entries:
         term = str(entry).strip()
@@ -157,7 +162,7 @@ def _merge_group(
     group: Mapping[str, object],
     candidates: Iterable[Mapping[str, object]],
     evidence_limit: int,
-) -> Dict[str, object] | None:
+) -> dict[str, object] | None:
     """
     단일 그룹 정보를 바탕으로 키워드 메타데이터를 병합합니다.
     """
@@ -170,13 +175,15 @@ def _merge_group(
     if not variants:
         variants = [canonical]
 
-    candidate_map: Dict[str, MutableMapping[str, object]] = {
+    candidate_map: dict[str, MutableMapping[str, object]] = {
         str(candidate.get("term", "")).strip(): dict(candidate)
         for candidate in candidates
         if str(candidate.get("term", "")).strip()
     }
 
-    matched_candidates = [candidate_map[variant] for variant in variants if variant in candidate_map]
+    matched_candidates = [
+        candidate_map[variant] for variant in variants if variant in candidate_map
+    ]
 
     if not matched_candidates and canonical in candidate_map:
         matched_candidates = [candidate_map[canonical]]
@@ -197,16 +204,22 @@ def _merge_group(
 
     combined_scores = _collect_scores(matched_candidates)
 
-    combined_occurrence = sum(int(item.get("occurrence_count", 1) or 1) for item in matched_candidates)
+    combined_occurrence = sum(
+        int(item.get("occurrence_count", 1) or 1) for item in matched_candidates
+    )
 
-    representative_term = canonical if canonical in combined_terms else matched_candidates[0].get("term", canonical)
+    representative_term = (
+        canonical
+        if canonical in combined_terms
+        else matched_candidates[0].get("term", canonical)
+    )
 
     final_score = max(combined_scores) if combined_scores else 0.0
 
     llm_confidence = float(group.get("confidence", 0.0) or 0.0)
     llm_rationale = str(group.get("rationale", "")).strip()
 
-    merged_entry: Dict[str, object] = {
+    merged_entry: dict[str, object] = {
         "term": representative_term,
         "original_variants": combined_terms,
         "score": final_score,
@@ -229,20 +242,22 @@ def _merge_group(
 
 
 def _collect_unprocessed_candidates(
-    normalized_candidates: Mapping[str, Dict[str, object]],
+    normalized_candidates: Mapping[str, dict[str, object]],
     processed_terms: Iterable[str],
     standalone_terms: Iterable[str],
     evidence_limit: int,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     LLM에서 다루지 않은 후보들을 그대로 유지합니다.
     """
-    remaining_terms = {term for term in normalized_candidates.keys() if term not in processed_terms}
-    standalone_set = {term for term in standalone_terms}
+    remaining_terms = {
+        term for term in normalized_candidates if term not in processed_terms
+    }
+    standalone_set = set(standalone_terms)
 
     preserved_terms = remaining_terms | standalone_set
 
-    preserved_keywords: List[Dict[str, object]] = []
+    preserved_keywords: list[dict[str, object]] = []
 
     for term in preserved_terms:
         candidate = normalized_candidates.get(term)
@@ -252,7 +267,9 @@ def _collect_unprocessed_candidates(
 
         preserved_entry = dict(candidate)
 
-        preserved_entry["original_variants"] = _collect_original_variants([candidate], term, [])
+        preserved_entry["original_variants"] = _collect_original_variants(
+            [candidate], term, []
+        )
         preserved_entry["evidence_ids"] = _collect_evidence([candidate], evidence_limit)
         preserved_entry["sources"] = _collect_sources([candidate])
 
@@ -261,7 +278,7 @@ def _collect_unprocessed_candidates(
     return preserved_keywords
 
 
-def _normalize_variants(raw_variants: object) -> List[str]:
+def _normalize_variants(raw_variants: object) -> list[str]:
     """
     변형 용어 목록을 중복 제거하며 정규화합니다.
     딕셔너리나 복잡한 객체는 제외합니다.
@@ -269,7 +286,7 @@ def _normalize_variants(raw_variants: object) -> List[str]:
     if not isinstance(raw_variants, Iterable):
         return []
 
-    normalized: List[str] = []
+    normalized: list[str] = []
 
     for variant in raw_variants:
         # 딕셔너리, 리스트, 튜플 등 복잡한 객체는 건너뛰기
@@ -279,7 +296,7 @@ def _normalize_variants(raw_variants: object) -> List[str]:
         term = str(variant).strip()
 
         # str(dict) 형태로 변환된 것도 필터링 ('{' 또는 '[' 로 시작)
-        if term and term not in normalized and not term.startswith(('{', '[')):
+        if term and term not in normalized and not term.startswith(("{", "[")):
             normalized.append(term)
 
     return normalized
@@ -289,13 +306,13 @@ def _collect_original_variants(
     matched_candidates: Sequence[Mapping[str, object]],
     canonical: str,
     variants: Sequence[str],
-) -> List[str]:
+) -> list[str]:
     """
     대표 용어와 변형 정보를 결합하여 original_variants를 구성합니다.
 
     문자열만 포함하도록 필터링하여 딕셔너리/복잡한 객체를 제외합니다.
     """
-    ordered_terms: List[str] = []
+    ordered_terms: list[str] = []
 
     def _append_distinct(items: Iterable[str]) -> None:
         for item in items:
@@ -312,9 +329,7 @@ def _collect_original_variants(
         if not isinstance(value, str):
             return False
         # str(dict)는 '{'로 시작하므로 이를 필터링
-        if value.strip().startswith('{') or value.strip().startswith('['):
-            return False
-        return True
+        return not (value.strip().startswith("{") or value.strip().startswith("["))
 
     _append_distinct([canonical])
     _append_distinct(variants)
@@ -332,7 +347,7 @@ def _collect_original_variants(
                 if isinstance(value, (dict, list, tuple)):
                     continue
                 # 문자열만 추가
-                if isinstance(value, str) and not value.strip().startswith(('{', '[')):
+                if isinstance(value, str) and not value.strip().startswith(("{", "[")):
                     valid_variants.append(value)
             _append_distinct(valid_variants)
 
@@ -341,11 +356,11 @@ def _collect_original_variants(
 
 def _collect_sources(
     matched_candidates: Sequence[Mapping[str, object]],
-) -> List[str]:
+) -> list[str]:
     """
     후보 키워드들의 출처를 합집합으로 정규화합니다.
     """
-    sources: List[str] = []
+    sources: list[str] = []
 
     for candidate in matched_candidates:
         candidate_sources = candidate.get("sources", [])
@@ -365,30 +380,31 @@ def _collect_sources(
 def _collect_evidence(
     matched_candidates: Sequence[Mapping[str, object]],
     evidence_limit: int,
-) -> List[int]:
+) -> list[int]:
     """
     evidence_ids를 순서를 유지하며 제한 개수만큼 모읍니다.
-    
+
     Args:
         matched_candidates: 매칭된 후보 키워드 시퀀스
         evidence_limit: 수집할 evidence_ids 최대 개수
-    
+
     Returns:
         evidence_ids 리스트 (정수 ID 리스트)
     """
-    evidence_ids: List[int] = []
+    evidence_ids: list[int] = []
 
     for candidate in matched_candidates:
         # evidence_ids 필드 확인 (evidence 필드는 무시)
         candidate_evidence_ids = candidate.get("evidence_ids", [])
-        
+
         # 하위 호환성: evidence 필드가 있으면 경고하고 무시
         if not candidate_evidence_ids and "evidence" in candidate:
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(
-                f"[_collect_evidence] 후보 키워드에 'evidence' 필드가 있지만 "
-                f"'evidence_ids'가 없습니다. 'evidence' 필드는 무시됩니다."
+                "[_collect_evidence] 후보 키워드에 'evidence' 필드가 있지만 "
+                "'evidence_ids'가 없습니다. 'evidence' 필드는 무시됩니다."
             )
 
         if not isinstance(candidate_evidence_ids, Iterable):
@@ -415,11 +431,11 @@ def _collect_evidence(
 
 def _collect_scores(
     matched_candidates: Sequence[Mapping[str, object]],
-) -> List[float]:
+) -> list[float]:
     """
     후보 점수 목록을 float로 변환하여 반환합니다.
     """
-    scores: List[float] = []
+    scores: list[float] = []
 
     for candidate in matched_candidates:
         try:
@@ -435,7 +451,7 @@ def _collect_scores(
 def _rank_and_trim(
     keywords: Sequence[Mapping[str, object]],
     top_n: int | None,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     점수 기준으로 정렬하고 필요한 경우 상위 N개만 반환합니다.
     """
