@@ -54,10 +54,24 @@ def build_json_report(state: AnalysisState) -> dict[str, Any]:
     narratives = insights.get("narratives")
     if narratives and isinstance(narratives, dict):
         # 세분화된 내러티브 (2-카테고리: macro, crypto, integrated)
-        total_paragraphs = sum(
-            len(narratives.get(cat, [])) for cat in ["macro", "crypto", "integrated"]
-        )
-        narrative_info = f"세분화된 내러티브 {total_paragraphs}개 문단"
+        total_paragraphs = 0
+        total_key_points = 0
+        for cat in ["macro", "crypto", "integrated"]:
+            cat_data = narratives.get(cat)
+            if isinstance(cat_data, dict):
+                # NarrativeWithKeyPoints 구조
+                total_paragraphs += len(cat_data.get("paragraphs", []))
+                total_key_points += len(cat_data.get("key_points", []))
+            elif isinstance(cat_data, list):
+                # legacy list[str] 구조
+                total_paragraphs += len(cat_data)
+        if total_key_points > 0:
+            narrative_info = (
+                f"세분화된 내러티브 {total_paragraphs}개 문단, "
+                f"Key Points {total_key_points}개"
+            )
+        else:
+            narrative_info = f"세분화된 내러티브 {total_paragraphs}개 문단"
     else:
         # 기존 방식
         narrative_summary = insights.get("narrative_summary", [])
@@ -342,10 +356,13 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
     """
     내러티브 요약 섹션을 생성합니다.
 
-    세분화 모드 활성화 시:
+    2단계 Key Points 기반 내러티브 (권장):
+        - Key Points bullet list 섹션
+        - 분석 섹션 (narrative paragraphs)
+
+    세분화 모드 (legacy, 하위 호환성):
         - Macro 내러티브 요약
-        - Crypto Native 내러티브 요약
-        - Crypto-Macro 내러티브 요약
+        - Crypto 내러티브 요약
         - 통합 내러티브 요약
 
     세분화 모드 비활성화 시:
@@ -367,25 +384,31 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
         sections = []
 
         # Macro 내러티브
-        macro_narratives = narratives.get("macro", [])
-        if macro_narratives:
-            sections.append(
-                "### Macro 내러티브 요약\n\n" + "\n\n".join(macro_narratives)
+        macro_data = narratives.get("macro")
+        if macro_data:
+            macro_section = _build_category_narrative_section(
+                "Macro", macro_data
             )
+            if macro_section:
+                sections.append(macro_section)
 
         # Crypto 내러티브 (통합: 온체인 + 제도권)
-        crypto_narratives = narratives.get("crypto", [])
-        if crypto_narratives:
-            sections.append(
-                "### Crypto 내러티브 요약\n\n" + "\n\n".join(crypto_narratives)
+        crypto_data = narratives.get("crypto")
+        if crypto_data:
+            crypto_section = _build_category_narrative_section(
+                "Crypto", crypto_data
             )
+            if crypto_section:
+                sections.append(crypto_section)
 
         # 통합 내러티브
-        integrated_narratives = narratives.get("integrated", [])
-        if integrated_narratives:
-            sections.append(
-                "### 통합 내러티브 요약\n\n" + "\n\n".join(integrated_narratives)
+        integrated_data = narratives.get("integrated")
+        if integrated_data:
+            integrated_section = _build_category_narrative_section(
+                "통합", integrated_data
             )
+            if integrated_section:
+                sections.append(integrated_section)
 
         if not sections:
             return "## 시장 내러티브 요약\n\n내러티브 요약이 없습니다."
@@ -407,6 +430,69 @@ def _build_markdown_narrative_section(state: AnalysisState) -> str:
         section = "## 시장 내러티브 요약\n\n" + "\n\n".join(paragraphs)
 
         return section
+
+
+def _build_category_narrative_section(
+    category_name: str,
+    category_data: dict[str, Any] | list[str],
+) -> str:
+    """
+    카테고리별 내러티브 섹션을 생성합니다.
+
+    NarrativeWithKeyPoints 구조 (권장):
+        - Key Points bullet list
+        - 분석 섹션 (paragraphs)
+
+    list[str] 구조 (legacy, 하위 호환성):
+        - 기존 방식의 문단 리스트
+
+    Args:
+        category_name: 카테고리 이름 (Macro, Crypto, 통합)
+        category_data: NarrativeWithKeyPoints dict 또는 list[str]
+
+    Returns:
+        Markdown 카테고리 내러티브 섹션 문자열
+    """
+    if isinstance(category_data, dict):
+        # NarrativeWithKeyPoints 구조 (새로운 2단계 방식)
+        key_points = category_data.get("key_points", [])
+        paragraphs = category_data.get("paragraphs", [])
+
+        section_parts = [f"### {category_name} 내러티브 요약"]
+
+        # Key Points 섹션
+        if key_points:
+            section_parts.append("")
+            section_parts.append("#### Key Points")
+            section_parts.append("")
+            for point in key_points:
+                section_parts.append(f"• {point}")
+
+        # 분석 섹션 (Narrative paragraphs)
+        if paragraphs:
+            section_parts.append("")
+            section_parts.append("#### 분석")
+            section_parts.append("")
+            section_parts.append("\n\n".join(paragraphs))
+
+        if len(section_parts) == 1:
+            # 헤더만 있는 경우 (데이터 없음)
+            return ""
+
+        return "\n".join(section_parts)
+
+    elif isinstance(category_data, list):
+        # list[str] 구조 (legacy 하위 호환성)
+        if not category_data:
+            return ""
+
+        return f"### {category_name} 내러티브 요약\n\n" + "\n\n".join(category_data)
+
+    else:
+        logger.warning(
+            f"[ReportBuilder] 알 수 없는 내러티브 데이터 타입: {type(category_data)}"
+        )
+        return ""
 
 
 def _build_markdown_insights_section(state: AnalysisState) -> str:

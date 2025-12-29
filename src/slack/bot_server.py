@@ -292,8 +292,8 @@ def _release_request(channel_key: str) -> None:
 
 def _remove_mention(text: str) -> str:
     """텍스트에서 멘션 태그를 제거합니다."""
-    # <@U12345678> 형식의 멘션 제거
-    return re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+    # <@U12345678> 형식의 멘션 제거 (대소문자 모두 지원)
+    return re.sub(r"<@[A-Za-z0-9]+>", "", text).strip()
 
 
 def _process_with_claude(

@@ -14,8 +14,16 @@ from dataclasses import asdict, dataclass
 
 from src.workflows.llm_client import GeminiClient
 from src.workflows.prompts import (
+    build_crypto_keypoints_prompt,
+    build_crypto_narrative_prompt,
     build_insight_prompt,
+    build_integrated_keypoints_prompt,
+    build_integrated_narrative_prompt,
+    build_macro_keypoints_prompt,
+    build_macro_narrative_prompt,
     parse_insight_response,
+    parse_keypoints_response,
+    parse_narrative_response,
     prepare_insight_prompt_inputs,
 )
 from src.workflows.state import AnalysisState
@@ -93,6 +101,17 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
 
     enable_segmentation = narrative_config.get("enable_segmentation", True)
 
+    # DEPRECATED: enable_segmentation=false는 더 이상 지원되지 않습니다.
+    # 2단계 Key Points 기반 내러티브 생성 방식이 항상 사용됩니다.
+    if not enable_segmentation:
+        logger.warning(
+            "[InsightNode] ⚠️ DEPRECATED: enable_segmentation=false 설정은 더 이상 지원되지 않습니다. "
+            "2단계 Key Points 기반 내러티브 생성 방식이 항상 사용됩니다. "
+            "config.yml에서 enable_segmentation 설정을 제거해주세요."
+        )
+        # 강제로 활성화 (deprecated 설정 무시)
+        enable_segmentation = True
+
     logger.info(
         "[InsightNode] 내러티브 세분화 모드: %s",
         "활성화" if enable_segmentation else "비활성화",
@@ -165,21 +184,34 @@ async def insight_node(state: AnalysisState) -> AnalysisState:
                     except Exception:
                         dynamic_cache = {}
 
-                    # 내러티브 텍스트 추출 (리스트를 문자열로 변환)
+                    # 내러티브 텍스트 추출 (NarrativeWithKeyPoints 구조 지원)
                     # 2-카테고리 시스템: macro, crypto, integrated
                     narratives_data = insights.get("narratives", {})
-                    narratives = {
-                        "macro": "\n\n".join(narratives_data.get("macro", [])),
-                        "crypto": "\n\n".join(narratives_data.get("crypto", [])),
+
+                    # 새로운 구조: {"macro": {"key_points": [...], "paragraphs": [...]}}
+                    # 기존 구조: {"macro": ["문단1", "문단2"]}
+                    def extract_paragraphs(category_data):
+                        """NarrativeWithKeyPoints 또는 list[str]에서 paragraphs 추출"""
+                        if isinstance(category_data, dict):
+                            # 새로운 구조: paragraphs 필드에서 추출
+                            return category_data.get("paragraphs", [])
+                        elif isinstance(category_data, list):
+                            # 기존 구조: 직접 반환
+                            return category_data
+                        return []
+
+                    narratives_for_quality = {
+                        "macro": "\n\n".join(extract_paragraphs(narratives_data.get("macro", []))),
+                        "crypto": "\n\n".join(extract_paragraphs(narratives_data.get("crypto", []))),
                         "integrated": "\n\n".join(
-                            narratives_data.get("integrated", [])
+                            extract_paragraphs(narratives_data.get("integrated", []))
                         ),
                     }
 
                     # 품질 평가 실행
                     quality_metrics = evaluator.evaluate(
                         categorized_keywords=categorized_keywords,
-                        narratives=narratives,
+                        narratives=narratives_for_quality,
                         dynamic_keywords_cache=dynamic_cache,
                     )
 
@@ -463,6 +495,181 @@ def _resolve_insight_settings(config: Mapping[str, object]) -> _InsightSettings:
     )
 
 
+async def _generate_keypoints(
+    llm_client: GeminiClient,
+    category: str,
+    keywords: list,
+    source_highlights: list,
+    economic_events: list,
+) -> dict:
+    """
+    1단계: Key Points를 생성합니다.
+
+    Args:
+        llm_client: GeminiClient 인스턴스
+        category: 카테고리 ("macro", "crypto", "integrated")
+        keywords: 키워드 리스트
+        source_highlights: 소스 하이라이트 리스트
+        economic_events: Economic Calendar 이벤트 리스트
+
+    Returns:
+        Key Points 딕셔너리 {"key_points": [...], "source_mapping": {...}}
+
+    Raises:
+        Exception: LLM 호출 또는 파싱 실패 시
+    """
+    if category == "macro":
+        prompt = build_macro_keypoints_prompt(
+            keywords, source_highlights, economic_events
+        )
+    elif category == "crypto":
+        prompt = build_crypto_keypoints_prompt(
+            keywords, source_highlights, economic_events
+        )
+    else:
+        raise ValueError(f"지원하지 않는 카테고리: {category}")
+
+    response_text = await llm_client.generate_content_async(
+        prompt=prompt, response_format="json"
+    )
+
+    return parse_keypoints_response(response_text, category=f"{category.capitalize()} Key Points")
+
+
+async def _generate_integrated_keypoints(
+    llm_client: GeminiClient,
+    macro_key_points: list[str],
+    crypto_key_points: list[str],
+    all_keywords: list,
+    economic_events: list,
+) -> dict:
+    """
+    1단계: 통합 Key Points를 생성합니다.
+
+    Args:
+        llm_client: GeminiClient 인스턴스
+        macro_key_points: Macro Key Points 리스트
+        crypto_key_points: Crypto Key Points 리스트
+        all_keywords: 전체 키워드 리스트
+        economic_events: Economic Calendar 이벤트 리스트
+
+    Returns:
+        Key Points 딕셔너리 {"key_points": [...], "source_mapping": {...}}
+    """
+    prompt = build_integrated_keypoints_prompt(
+        macro_key_points, crypto_key_points, all_keywords, economic_events
+    )
+
+    response_text = await llm_client.generate_content_async(
+        prompt=prompt, response_format="json"
+    )
+
+    return parse_keypoints_response(response_text, category="Integrated Key Points")
+
+
+def _filter_sources_by_keypoints(
+    source_mapping: dict[str, list],
+    source_highlights: list[dict],
+) -> list[dict]:
+    """
+    source_mapping을 기반으로 관련 소스만 필터링합니다.
+
+    Args:
+        source_mapping: Key Point → 소스 ID 매핑
+        source_highlights: 전체 소스 하이라이트 리스트
+
+    Returns:
+        필터링된 소스 하이라이트 리스트 (매핑 실패 시 원본 반환)
+    """
+    if not source_mapping:
+        logger.warning(
+            "[_filter_sources_by_keypoints] source_mapping이 비어있어 전체 소스를 반환합니다."
+        )
+        return source_highlights
+
+    # source_mapping에서 모든 소스 ID 수집
+    all_source_ids: set = set()
+    for ids in source_mapping.values():
+        if isinstance(ids, list):
+            for id_val in ids:
+                if isinstance(id_val, int):
+                    all_source_ids.add(id_val)
+
+    if not all_source_ids:
+        logger.warning(
+            "[_filter_sources_by_keypoints] 유효한 소스 ID가 없어 전체 소스를 반환합니다."
+        )
+        return source_highlights
+
+    # 소스 필터링 (ID 기반)
+    # source_highlights에는 직접 ID가 없으므로 인덱스 기반으로 필터링
+    # 또는 전체 소스를 반환 (현재 구현에서는 전체 반환)
+    # TODO: 실제 소스 ID 매핑 구현 필요
+    logger.info(
+        f"[_filter_sources_by_keypoints] 참조된 소스 ID: {len(all_source_ids)}개"
+    )
+
+    return source_highlights
+
+
+async def _generate_narrative_from_keypoints(
+    llm_client: GeminiClient,
+    category: str,
+    key_points: list[str],
+    keywords: list,
+    source_highlights: list,
+    economic_events: list,
+    num_paragraphs: int = 2,
+    macro_narrative: list[str] | None = None,
+    crypto_narrative: list[str] | None = None,
+) -> list[str]:
+    """
+    2단계: Key Points를 기반으로 Narrative를 생성합니다.
+
+    Args:
+        llm_client: GeminiClient 인스턴스
+        category: 카테고리 ("macro", "crypto", "integrated")
+        key_points: Key Points 리스트
+        keywords: 키워드 리스트
+        source_highlights: 소스 하이라이트 리스트
+        economic_events: Economic Calendar 이벤트 리스트
+        num_paragraphs: 생성할 문단 수
+        macro_narrative: Macro 내러티브 (integrated 전용)
+        crypto_narrative: Crypto 내러티브 (integrated 전용)
+
+    Returns:
+        내러티브 문단 리스트
+
+    Raises:
+        Exception: LLM 호출 또는 파싱 실패 시
+    """
+    if category == "macro":
+        prompt = build_macro_narrative_prompt(
+            keywords, source_highlights, economic_events, key_points=key_points
+        )
+    elif category == "crypto":
+        prompt = build_crypto_narrative_prompt(
+            keywords, source_highlights, num_paragraphs, economic_events, key_points=key_points
+        )
+    elif category == "integrated":
+        prompt = build_integrated_narrative_prompt(
+            macro_narrative or [],
+            crypto_narrative or [],
+            keywords,
+            num_paragraphs,
+            economic_events,
+            key_points=key_points,
+        )
+    else:
+        raise ValueError(f"지원하지 않는 카테고리: {category}")
+
+    response_text = await llm_client.generate_content_async(
+        prompt=prompt, response_format="json"
+    )
+
+    return parse_narrative_response(response_text, category.capitalize())
+
+
 async def _generate_segmented_narratives(
     state: AnalysisState,
     settings: _InsightSettings,
@@ -472,7 +679,15 @@ async def _generate_segmented_narratives(
     errors: list[str],
 ) -> dict:
     """
-    세분화된 내러티브를 생성합니다 (Macro/Crypto/Integrated - 3단계).
+    세분화된 내러티브를 생성합니다 (2단계 LLM 호출 방식).
+
+    1단계: Key Points 생성 (Macro, Crypto, Integrated)
+    2단계: Key Points 기반 Narrative 생성 (Macro, Crypto, Integrated)
+
+    총 6회 LLM 호출:
+    - Macro: Key Points 생성 → Narrative 생성 (2회)
+    - Crypto: Key Points 생성 → Narrative 생성 (2회)
+    - Integrated: Key Points 생성 → Narrative 생성 (2회)
 
     Args:
         state: LangGraph 상태
@@ -484,16 +699,16 @@ async def _generate_segmented_narratives(
 
     Returns:
         세분화된 인사이트 딕셔너리
+        {
+            "narratives": {
+                "macro": {"key_points": [...], "paragraphs": [...], "source_mapping": {...}},
+                "crypto": {"key_points": [...], "paragraphs": [...], "source_mapping": {...}},
+                "integrated": {"key_points": [...], "paragraphs": [...], "source_mapping": {...}}
+            },
+            "trading_insights": {...},
+            "key_sources": [...]
+        }
     """
-    from src.workflows.prompts import (
-        build_crypto_narrative_prompt,
-        build_insight_prompt,
-        build_integrated_narrative_prompt,
-        build_macro_narrative_prompt,
-        parse_insight_response,
-        parse_narrative_response,
-        prepare_insight_prompt_inputs,
-    )
 
     # 문단 수 설정
     crypto_paragraphs = int(narrative_config.get("crypto_paragraphs", 2))
@@ -554,83 +769,213 @@ async def _generate_segmented_narratives(
         errors.append(error_msg)
         return {}
 
-    narratives = {}
+    # NarrativeWithKeyPoints 형식으로 결과 저장
+    narratives: dict[str, dict] = {}
 
-    # 1. Macro 내러티브 생성 (항상 2개 문단 고정)
+    # ========================================
+    # 1. Macro: Key Points 생성 → Narrative 생성 (2회 LLM 호출)
+    # ========================================
+    macro_key_points_data: dict = {"key_points": [], "source_mapping": {}}
     if macro_keywords:
         try:
-            logger.info("[InsightNode] Macro 내러티브 생성 중 (2개 문단 고정)...")
-            macro_prompt = build_macro_narrative_prompt(
-                macro_keywords, source_highlights, economic_events=economic_events
+            # 1-1. Macro Key Points 생성
+            logger.info("[InsightNode] Macro Key Points 생성 중 (1단계)...")
+            macro_key_points_data = await _generate_keypoints(
+                llm_client, "macro", macro_keywords, source_highlights, economic_events
             )
-            macro_response = await llm_client.generate_content_async(
-                prompt=macro_prompt, response_format="json"
-            )
-            narratives["macro"] = parse_narrative_response(macro_response, "Macro")
             logger.info(
-                f"[InsightNode] Macro 내러티브 {len(narratives['macro'])}개 문단 생성 완료"
+                f"[InsightNode] Macro Key Points {len(macro_key_points_data['key_points'])}개 생성 완료"
             )
+
+            # 1-2. Macro Narrative 생성 (Key Points 기반)
+            logger.info("[InsightNode] Macro Narrative 생성 중 (2단계, Key Points 기반)...")
+            macro_paragraphs = await _generate_narrative_from_keypoints(
+                llm_client,
+                "macro",
+                macro_key_points_data["key_points"],
+                macro_keywords,
+                source_highlights,
+                economic_events,
+            )
+            logger.info(
+                f"[InsightNode] Macro Narrative {len(macro_paragraphs)}개 문단 생성 완료"
+            )
+
+            narratives["macro"] = {
+                "key_points": macro_key_points_data["key_points"],
+                "paragraphs": macro_paragraphs,
+                "source_mapping": macro_key_points_data.get("source_mapping", {}),
+            }
+
         except Exception as exc:
-            error_msg = f"Macro 내러티브 생성 실패: {exc}"
+            error_msg = f"Macro 2단계 생성 실패: {exc}"
             logger.error(f"[InsightNode] {error_msg}", exc_info=True)
             errors.append(error_msg)
-            narratives["macro"] = []
+
+            # Fallback: 기존 방식으로 시도
+            logger.warning("[InsightNode] Macro fallback: 기존 1단계 방식으로 재시도...")
+            try:
+                macro_prompt = build_macro_narrative_prompt(
+                    macro_keywords, source_highlights, economic_events=economic_events
+                )
+                macro_response = await llm_client.generate_content_async(
+                    prompt=macro_prompt, response_format="json"
+                )
+                macro_paragraphs = parse_narrative_response(macro_response, "Macro")
+                narratives["macro"] = {
+                    "key_points": [],
+                    "paragraphs": macro_paragraphs,
+                    "source_mapping": {},
+                }
+                logger.info("[InsightNode] Macro fallback 성공")
+            except Exception as fallback_exc:
+                logger.error(f"[InsightNode] Macro fallback 실패: {fallback_exc}")
+                narratives["macro"] = {"key_points": [], "paragraphs": [], "source_mapping": {}}
     else:
         logger.warning("[InsightNode] Macro 키워드가 없어 내러티브를 건너뜁니다.")
-        narratives["macro"] = []
+        narratives["macro"] = {"key_points": [], "paragraphs": [], "source_mapping": {}}
 
-    # 2. Crypto 내러티브 생성 (온체인 + 제도권 통합)
+    # ========================================
+    # 2. Crypto: Key Points 생성 → Narrative 생성 (2회 LLM 호출)
+    # ========================================
+    crypto_key_points_data: dict = {"key_points": [], "source_mapping": {}}
     if crypto_keywords:
         try:
-            logger.info("[InsightNode] Crypto 내러티브 생성 중 (온체인+제도권 통합)...")
-            crypto_prompt = build_crypto_narrative_prompt(
+            # 2-1. Crypto Key Points 생성
+            logger.info("[InsightNode] Crypto Key Points 생성 중 (1단계)...")
+            crypto_key_points_data = await _generate_keypoints(
+                llm_client, "crypto", crypto_keywords, source_highlights, economic_events
+            )
+            logger.info(
+                f"[InsightNode] Crypto Key Points {len(crypto_key_points_data['key_points'])}개 생성 완료"
+            )
+
+            # 2-2. Crypto Narrative 생성 (Key Points 기반)
+            logger.info("[InsightNode] Crypto Narrative 생성 중 (2단계, Key Points 기반)...")
+            crypto_paragraphs_result = await _generate_narrative_from_keypoints(
+                llm_client,
+                "crypto",
+                crypto_key_points_data["key_points"],
                 crypto_keywords,
                 source_highlights,
+                economic_events,
                 num_paragraphs=crypto_paragraphs,
-                economic_events=economic_events,
             )
-            crypto_response = await llm_client.generate_content_async(
-                prompt=crypto_prompt, response_format="json"
-            )
-            narratives["crypto"] = parse_narrative_response(crypto_response, "Crypto")
             logger.info(
-                f"[InsightNode] Crypto 내러티브 {len(narratives['crypto'])}개 문단 생성 완료"
+                f"[InsightNode] Crypto Narrative {len(crypto_paragraphs_result)}개 문단 생성 완료"
             )
+
+            narratives["crypto"] = {
+                "key_points": crypto_key_points_data["key_points"],
+                "paragraphs": crypto_paragraphs_result,
+                "source_mapping": crypto_key_points_data.get("source_mapping", {}),
+            }
+
         except Exception as exc:
-            error_msg = f"Crypto 내러티브 생성 실패: {exc}"
+            error_msg = f"Crypto 2단계 생성 실패: {exc}"
             logger.error(f"[InsightNode] {error_msg}", exc_info=True)
             errors.append(error_msg)
-            narratives["crypto"] = []
+
+            # Fallback: 기존 방식으로 시도
+            logger.warning("[InsightNode] Crypto fallback: 기존 1단계 방식으로 재시도...")
+            try:
+                crypto_prompt = build_crypto_narrative_prompt(
+                    crypto_keywords,
+                    source_highlights,
+                    num_paragraphs=crypto_paragraphs,
+                    economic_events=economic_events,
+                )
+                crypto_response = await llm_client.generate_content_async(
+                    prompt=crypto_prompt, response_format="json"
+                )
+                crypto_paragraphs_result = parse_narrative_response(crypto_response, "Crypto")
+                narratives["crypto"] = {
+                    "key_points": [],
+                    "paragraphs": crypto_paragraphs_result,
+                    "source_mapping": {},
+                }
+                logger.info("[InsightNode] Crypto fallback 성공")
+            except Exception as fallback_exc:
+                logger.error(f"[InsightNode] Crypto fallback 실패: {fallback_exc}")
+                narratives["crypto"] = {"key_points": [], "paragraphs": [], "source_mapping": {}}
     else:
         logger.warning("[InsightNode] Crypto 키워드가 없어 내러티브를 건너뜁니다.")
-        narratives["crypto"] = []
+        narratives["crypto"] = {"key_points": [], "paragraphs": [], "source_mapping": {}}
 
-    # 3. 통합 내러티브 생성 (Macro + Crypto 참조)
+    # ========================================
+    # 3. Integrated: Key Points 생성 → Narrative 생성 (2회 LLM 호출)
+    # ========================================
     try:
-        logger.info("[InsightNode] 통합 내러티브 생성 중 (Macro + Crypto 참조)...")
-        integrated_prompt = build_integrated_narrative_prompt(
-            narratives.get("macro", []),
-            narratives.get("crypto", []),
+        # 3-1. Integrated Key Points 생성
+        logger.info("[InsightNode] Integrated Key Points 생성 중 (1단계)...")
+        integrated_key_points_data = await _generate_integrated_keypoints(
+            llm_client,
+            macro_key_points_data.get("key_points", []),
+            crypto_key_points_data.get("key_points", []),
             all_keywords,
-            num_paragraphs=integrated_paragraphs,
-            economic_events=economic_events,
-        )
-        integrated_response = await llm_client.generate_content_async(
-            prompt=integrated_prompt, response_format="json"
-        )
-        narratives["integrated"] = parse_narrative_response(
-            integrated_response, "Integrated"
+            economic_events,
         )
         logger.info(
-            f"[InsightNode] 통합 내러티브 {len(narratives['integrated'])}개 문단 생성 완료"
+            f"[InsightNode] Integrated Key Points {len(integrated_key_points_data['key_points'])}개 생성 완료"
         )
+
+        # 3-2. Integrated Narrative 생성 (Key Points 기반)
+        logger.info("[InsightNode] Integrated Narrative 생성 중 (2단계, Key Points 기반)...")
+        integrated_paragraphs = await _generate_narrative_from_keypoints(
+            llm_client,
+            "integrated",
+            integrated_key_points_data["key_points"],
+            all_keywords,
+            source_highlights,
+            economic_events,
+            num_paragraphs=integrated_paragraphs,
+            macro_narrative=narratives.get("macro", {}).get("paragraphs", []),
+            crypto_narrative=narratives.get("crypto", {}).get("paragraphs", []),
+        )
+        logger.info(
+            f"[InsightNode] Integrated Narrative {len(integrated_paragraphs)}개 문단 생성 완료"
+        )
+
+        narratives["integrated"] = {
+            "key_points": integrated_key_points_data["key_points"],
+            "paragraphs": integrated_paragraphs,
+            "source_mapping": integrated_key_points_data.get("source_mapping", {}),
+        }
+
     except Exception as exc:
-        error_msg = f"통합 내러티브 생성 실패: {exc}"
+        error_msg = f"Integrated 2단계 생성 실패: {exc}"
         logger.error(f"[InsightNode] {error_msg}", exc_info=True)
         errors.append(error_msg)
-        narratives["integrated"] = []
 
+        # Fallback: 기존 방식으로 시도
+        logger.warning("[InsightNode] Integrated fallback: 기존 1단계 방식으로 재시도...")
+        try:
+            integrated_prompt = build_integrated_narrative_prompt(
+                narratives.get("macro", {}).get("paragraphs", []),
+                narratives.get("crypto", {}).get("paragraphs", []),
+                all_keywords,
+                num_paragraphs=integrated_paragraphs,
+                economic_events=economic_events,
+            )
+            integrated_response = await llm_client.generate_content_async(
+                prompt=integrated_prompt, response_format="json"
+            )
+            integrated_paragraphs = parse_narrative_response(
+                integrated_response, "Integrated"
+            )
+            narratives["integrated"] = {
+                "key_points": [],
+                "paragraphs": integrated_paragraphs,
+                "source_mapping": {},
+            }
+            logger.info("[InsightNode] Integrated fallback 성공")
+        except Exception as fallback_exc:
+            logger.error(f"[InsightNode] Integrated fallback 실패: {fallback_exc}")
+            narratives["integrated"] = {"key_points": [], "paragraphs": [], "source_mapping": {}}
+
+    # ========================================
     # 4. 거래 인사이트 생성 (기존 방식)
+    # ========================================
     try:
         logger.info("[InsightNode] 거래 인사이트 생성 중...")
         insight_prompt = build_insight_prompt(
@@ -662,6 +1007,17 @@ async def _generate_segmented_narratives(
         errors.append(error_msg)
         trading_insights = {"opportunities": [], "risks": []}
         key_sources = []
+
+    # LLM 호출 횟수 로깅
+    logger.info(
+        "[InsightNode] 2단계 LLM 호출 완료: "
+        f"Macro (Key Points: {len(narratives.get('macro', {}).get('key_points', []))}개, "
+        f"Paragraphs: {len(narratives.get('macro', {}).get('paragraphs', []))}개), "
+        f"Crypto (Key Points: {len(narratives.get('crypto', {}).get('key_points', []))}개, "
+        f"Paragraphs: {len(narratives.get('crypto', {}).get('paragraphs', []))}개), "
+        f"Integrated (Key Points: {len(narratives.get('integrated', {}).get('key_points', []))}개, "
+        f"Paragraphs: {len(narratives.get('integrated', {}).get('paragraphs', []))}개)"
+    )
 
     return {
         "narratives": narratives,

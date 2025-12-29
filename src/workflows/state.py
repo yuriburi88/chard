@@ -8,6 +8,49 @@ from datetime import datetime
 from typing import Any, TypedDict
 
 
+class NarrativeWithKeyPoints(TypedDict, total=False):
+    """
+    Key Points를 포함한 내러티브 타입 정의
+
+    2단계 LLM 호출 방식에서 사용되는 새로운 내러티브 구조입니다.
+    1단계: Key Points 생성 → 2단계: Key Points 기반 Narrative 생성
+
+    필드 설명:
+    - key_points: 핵심 포인트 리스트 (5~20개)
+    - paragraphs: 내러티브 문단 리스트
+    - source_mapping: Key Point → 소스 ID 매핑
+    """
+
+    key_points: list[str]
+    """핵심 포인트 리스트
+
+    LLM이 데이터에서 추출한 핵심 정보입니다.
+    각 포인트는 정량적 데이터를 포함하며, 중요도순으로 정렬됩니다.
+    개수는 5~20개 범위에서 LLM이 자동 결정합니다.
+    """
+
+    paragraphs: list[str]
+    """내러티브 문단 리스트
+
+    Key Points를 기반으로 생성된 내러티브 문단입니다.
+    기존 narrative 배열과 동일한 형식입니다.
+    """
+
+    source_mapping: dict[str, list[int]]
+    """Key Point → 소스 ID 매핑
+
+    각 Key Point가 어떤 소스에서 추출되었는지 매핑합니다.
+    Key는 Key Point 인덱스(문자열), Value는 소스 ID 리스트입니다.
+
+    예시:
+    {
+        "0": [123, 456],  # 첫 번째 Key Point의 소스 ID들
+        "1": [789],       # 두 번째 Key Point의 소스 ID
+        ...
+    }
+    """
+
+
 class AnalysisState(TypedDict, total=False):
     """
     LangGraph 워크플로 상태
@@ -136,20 +179,31 @@ class AnalysisState(TypedDict, total=False):
 
     InsightNode에서 생성된 인사이트입니다.
 
-    세분화 모드 비활성화 시:
+    [DEPRECATED] 세분화 모드 비활성화 시 (legacy):
     {
-        "narrative_summary": ["문단1", "문단2", "문단3"],
+        "narrative_summary": ["문단1", "문단2", "문단3"],  # deprecated
         "trading_insights": {...},
         "key_sources": [...]
     }
 
-    세분화 모드 활성화 시:
+    [NEW] 2단계 Key Points 기반 내러티브 (권장):
     {
         "narratives": {
-            "macro": ["Macro 문단1", "Macro 문단2"],
-            "crypto_native": ["Crypto Native 문단1", "Crypto Native 문단2"],
-            "crypto_macro": ["Crypto-Macro 문단1", "Crypto-Macro 문단2"],
-            "integrated": ["통합 문단1", "통합 문단2", "통합 문단3"]
+            "macro": {
+                "key_points": ["포인트1", "포인트2", ...],  # 5~20개
+                "paragraphs": ["문단1", "문단2"],
+                "source_mapping": {"0": [123, 456], "1": [789]}
+            },
+            "crypto": {
+                "key_points": ["포인트1", "포인트2", ...],
+                "paragraphs": ["문단1", "문단2"],
+                "source_mapping": {"0": [234], ...}
+            },
+            "integrated": {
+                "key_points": ["포인트1", "포인트2", ...],
+                "paragraphs": ["문단1", "문단2", "문단3"],
+                "source_mapping": {"0": [345], ...}
+            }
         },
         "trading_insights": {
             "opportunities": ["인사이트1", "인사이트2"],
@@ -173,6 +227,20 @@ class AnalysisState(TypedDict, total=False):
             }
         ]
     }
+
+    [DEPRECATED] 기존 세분화 모드 (하위 호환성 유지):
+    {
+        "narratives": {
+            "macro": ["Macro 문단1", "Macro 문단2"],  # list[str] 형식 (deprecated)
+            "crypto_native": ["Crypto Native 문단1", ...],  # deprecated
+            "crypto_macro": ["Crypto-Macro 문단1", ...],  # deprecated
+            "integrated": ["통합 문단1", ...]  # list[str] 형식 (deprecated)
+        },
+        ...
+    }
+
+    Note: 새로운 NarrativeWithKeyPoints 타입은 key_points, paragraphs, source_mapping을
+    포함하는 dict 구조입니다. 기존 list[str] 형식도 하위 호환성을 위해 지원됩니다.
     """
 
     quality_metrics: dict[str, Any] | None

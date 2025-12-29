@@ -382,12 +382,67 @@ async def _get_analysis_summary() -> str:
                 summary += f"  {i}. {kw}\n"
         summary += "\n"
 
-    # 인사이트 정보
+    # 내러티브 정보 (Key Points + 문단)
     insights = data.get("insights", {})
+    narratives = insights.get("narratives", {})
+
+    if narratives:
+        # Macro 내러티브
+        macro = narratives.get("macro", {})
+        if macro:
+            macro_key_points = macro.get("key_points", [])
+            macro_paragraphs = macro.get("paragraphs", [])
+
+            if macro_key_points:
+                summary += "📈 Macro Key Points:\n"
+                for i, point in enumerate(macro_key_points, 1):
+                    summary += f"  {i}. {point}\n"
+                summary += "\n"
+
+            if macro_paragraphs:
+                summary += "📝 Macro 내러티브:\n"
+                for paragraph in macro_paragraphs:
+                    summary += f"{paragraph}\n\n"
+
+        # Crypto 내러티브
+        crypto = narratives.get("crypto", {})
+        if crypto:
+            crypto_key_points = crypto.get("key_points", [])
+            crypto_paragraphs = crypto.get("paragraphs", [])
+
+            if crypto_key_points:
+                summary += "🪙 Crypto Key Points:\n"
+                for i, point in enumerate(crypto_key_points, 1):
+                    summary += f"  {i}. {point}\n"
+                summary += "\n"
+
+            if crypto_paragraphs:
+                summary += "📝 Crypto 내러티브:\n"
+                for paragraph in crypto_paragraphs:
+                    summary += f"{paragraph}\n\n"
+
+        # 통합 내러티브
+        integrated = narratives.get("integrated", {})
+        if integrated:
+            integrated_key_points = integrated.get("key_points", [])
+            integrated_paragraphs = integrated.get("paragraphs", [])
+
+            if integrated_key_points:
+                summary += "🔗 통합 Key Points:\n"
+                for i, point in enumerate(integrated_key_points, 1):
+                    summary += f"  {i}. {point}\n"
+                summary += "\n"
+
+            if integrated_paragraphs:
+                summary += "📝 통합 내러티브:\n"
+                for paragraph in integrated_paragraphs:
+                    summary += f"{paragraph}\n\n"
+
+    # 기존 인사이트 정보 (시장 심리, 변동성)
     if insights:
         if "market_sentiment" in insights:
             sentiment = insights["market_sentiment"]
-            summary += f"📈 시장 심리: {sentiment.get('direction', 'N/A')} "
+            summary += f"📊 시장 심리: {sentiment.get('direction', 'N/A')} "
             summary += f"(신뢰도 {sentiment.get('confidence', 0):.0%})\n"
 
         if "volatility" in insights:

@@ -248,6 +248,17 @@ async def aggregator_node(state: AnalysisState) -> AnalysisState:
     narrative_config = config.get("narrative", {})
     enable_segmentation = narrative_config.get("enable_segmentation", True)
 
+    # DEPRECATED: enable_segmentation=false는 더 이상 지원되지 않습니다.
+    # 2단계 Key Points 기반 내러티브 생성 방식이 항상 사용됩니다.
+    if not enable_segmentation:
+        logger.warning(
+            "[AggregatorNode] ⚠️ DEPRECATED: enable_segmentation=false 설정은 더 이상 지원되지 않습니다. "
+            "키워드 카테고리 분류가 항상 수행됩니다. "
+            "config.yml에서 enable_segmentation 설정을 제거해주세요."
+        )
+        # 강제로 활성화 (deprecated 설정 무시)
+        enable_segmentation = True
+
     if enable_segmentation and final_keywords:
         try:
             from src.workflows.dynamic_keywords import DynamicKeywordManager

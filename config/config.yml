@@ -237,8 +237,12 @@ normalization:
   embedding_model: models/text-embedding-004
 
 # 내러티브 세분화 설정 (3단계: Macro → Crypto → Integrated)
+# 2단계 Key Points 기반 내러티브 생성 방식 사용
 narrative:
-  enable_segmentation: true          # 내러티브 세분화 활성화
+  # [DEPRECATED] enable_segmentation 설정은 더 이상 사용되지 않습니다.
+  # 2단계 Key Points 기반 내러티브 생성 방식이 항상 사용됩니다.
+  # 이 설정은 무시되며, 향후 버전에서 제거될 예정입니다.
+  enable_segmentation: true          # DEPRECATED - 항상 true로 동작
   # macro_paragraphs: 2              # [고정] Macro 내러티브는 항상 2개 문단 (과거 분석 + 미래 전망)
   crypto_paragraphs: 2               # Crypto 내러티브 문단 수 (온체인+제도권 통합)
   integrated_paragraphs: 3           # 통합 내러티브 문단 수 (Macro+Crypto 참조)
@@ -246,8 +250,8 @@ narrative:
 
   # 카테고리별 차등 임계값 (2-카테고리 시스템: Macro, Crypto)
   category_thresholds:
-    macro: 0.4                       # 거시경제: 중간 수준 (금리, GDP, 인플레이션 등)
-    crypto: 0.3                      # 암호화폐: 관대 (BTC, ETH, DeFi, ETF, 규제 등)
+    macro: 0.2                       # 거시경제: 중간 수준 (금리, GDP, 인플레이션 등)
+    crypto: 0.2                      # 암호화폐: 관대 (BTC, ETH, DeFi, ETF, 규제 등)
 
   # 동적 키워드 학습 설정
   dynamic_keywords:

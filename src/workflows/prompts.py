@@ -1032,16 +1032,16 @@ def _build_source_highlights(
 # ============================================================================
 
 
-def build_macro_narrative_prompt(
+def _build_macro_prompt_base(
     keywords: list[dict[str, Any]],
     source_highlights: list[dict[str, Any]],
     economic_events: Sequence[Any] | None = None,
-) -> str:
+) -> tuple[str, str]:
     """
-    Macro 내러티브 프롬프트를 생성합니다.
+    Macro 프롬프트의 공통 부분을 구성합니다.
 
-    거시경제 요인(금리, 인플레이션, 주식시장, 규제 등)에 집중한 내러티브를 생성합니다.
-    항상 2개 문단으로 고정: 문단1(과거 분석), 문단2(미래 전망)
+    이 헬퍼 함수는 system_prompt와 user_prompt_base(데이터 섹션 + 작성 원칙)를 반환합니다.
+    Key Points 프롬프트와 Narrative 프롬프트에서 재사용됩니다.
 
     Args:
         keywords: Macro 카테고리 키워드 리스트
@@ -1049,10 +1049,10 @@ def build_macro_narrative_prompt(
         economic_events: Economic Calendar 이벤트 리스트 (선택)
 
     Returns:
-        Gemini API 호출용 프롬프트 문자열
+        (system_prompt, user_prompt_base) 튜플
+        - system_prompt: 역할 정의
+        - user_prompt_base: 데이터 섹션 + 공통 작성 원칙
     """
-    import json
-
     keywords_json = json.dumps(keywords, ensure_ascii=False, indent=2)
     sources_json = json.dumps(source_highlights, ensure_ascii=False, indent=2)
 
@@ -1067,11 +1067,7 @@ def build_macro_narrative_prompt(
         "금리, 주식, 환율, Commodity시장에 미치는 영향을 분석하세요.\n"
         "\n"
         "당신의 목표는 주기적으로 시황을 작성하는 것이며, 근거를 기반으로 명확한 현황 분석 및 전망을 제시하는 것입니다.\n"
-        "당신은 트레이더이기 때문에, 실제 매매에 활용할 수 있는 분석을 제공하세요.\n"
-        "\n"
-        "**문단 구성**:\n"
-        "- 문단1: 과거 이벤트 분석 (발표된 경제 지표와 시장 반응)\n"
-        "- 문단2: 미래 이벤트 전망 (예정된 경제 지표와 시장 기대)"
+        "당신은 트레이더이기 때문에, 실제 매매에 활용할 수 있는 분석을 제공하세요."
     )
 
     user_prompt_parts = []
@@ -1099,7 +1095,257 @@ def build_macro_narrative_prompt(
         )
 
     # ========================================
-    # 2. 문단별 작성 가이드
+    # 2. 공통 작성 원칙
+    # ========================================
+    user_prompt_parts.append(
+        "---\n\n"
+        "## 공통 작성 원칙\n\n"
+        "### 인과관계 작성 시 주의사항\n"
+        "- ✅ 원인과 결과를 논리적으로 연결: 'A로 인해 B 발생', 'A가 B를 견인'\n"
+        "- ✅ 각 단계의 전달 경로 명확히: A → B → C\n"
+        "- ✅ '~에도 불구하고'는 역접(반대) 상황에만 사용\n"
+        "- ✅ **방향성 정확히 구분**:\n"
+        "  • 매파 = 금리 인상 성향 → 달러 강세 압력\n"
+        "  • 비둘기파 = 금리 인하 성향 → 달러 약세 압력\n"
+        "  • 금리 인상 → 달러 강세, 금리 인하 → 달러 약세\n"
+        "  • 강세/약세, 상승/하락, 우려/기대 등 반대 의미 용어 혼동 금지\n"
+        "- ✅ 불확실한 인과관계는 단정 금지: '~할 가능성', '~로 해석됨' 등으로 표현\n\n"
+        "### 긍정/부정 요인 구분\n"
+        "상반된 요인이 있다면 명확히 구분하여 서술:\n"
+        "- 긍정적 요인(금리 하락, 주가 상승 압력): ...\n"
+        "- 부정적 요인(금리 상승, 주가 하락 압력): ...\n"
+        "- 최종 결과: 어느 쪽 압력이 우세했는지 명시\n\n"
+        "### 근거 및 데이터\n"
+        "- 정량적 데이터 필수 포함 (%, bp, 지수, 금액 등)\n"
+        "- 출처 명시 (Fed, Bloomberg, ECB 등)\n"
+        "- 과거 유사 사례 참조 가능\n\n"
+        "### 팩트 체크 (중요)\n"
+        "- **예정된 경제 지표 일정은 반드시 제공된 Economic Calendar 데이터에서만 인용**하세요\n"
+        "- 제공된 데이터에 없는 일정을 추측하거나 만들어내지 마세요\n"
+        "- '다음 주', '다음 달' 등 시점 언급 시 반드시 출처 확인\n"
+        "- 불확실한 일정은 언급하지 않거나 '확인 필요'로 표기\n"
+    )
+
+    user_prompt_base = "".join(user_prompt_parts)
+    return system_prompt, user_prompt_base
+
+
+def _build_crypto_prompt_base(
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
+    economic_events: Sequence[Any] | None = None,
+) -> tuple[str, str]:
+    """
+    Crypto 프롬프트의 공통 부분을 구성합니다.
+
+    이 헬퍼 함수는 system_prompt와 user_prompt_base(데이터 섹션 + 작성 원칙)를 반환합니다.
+    Key Points 프롬프트와 Narrative 프롬프트에서 재사용됩니다.
+
+    Args:
+        keywords: Crypto 카테고리 키워드 리스트
+        source_highlights: 주요 출처 하이라이트
+        economic_events: Economic Calendar 이벤트 리스트 (선택)
+
+    Returns:
+        (system_prompt, user_prompt_base) 튜플
+        - system_prompt: 역할 정의
+        - user_prompt_base: 데이터 섹션 + 공통 작성 원칙
+    """
+    keywords_json = json.dumps(keywords, ensure_ascii=False, indent=2)
+    sources_json = json.dumps(source_highlights, ensure_ascii=False, indent=2)
+    economic_calendar_text = format_economic_calendar(economic_events)
+
+    system_prompt = (
+        "당신은 암호화폐 시장 전문 분석가이자 현업 트레이더입니다.\n"
+        "온체인 데이터(DeFi, 프로토콜, TVL)와 제도권 동향(ETF, 규제, 기관투자, Crypto 정책)을 종합 분석하고,\n"
+        "시장 반응의 인과관계를 명확히 제시하세요.\n"
+        "\n"
+        "당신의 목표는 주기적으로 암호화폐 시장 시황을 작성하는 것이며, 근거를 기반으로 명확한 현황 분석 및 전망을 제시하는 것입니다.\n"
+        "당신은 트레이더이기 때문에, 실제 매매에 활용할 수 있는 분석을 제공하세요."
+    )
+
+    user_prompt_parts = []
+
+    # ========================================
+    # 1. 데이터 제공 섹션
+    # ========================================
+    user_prompt_parts.append(
+        "## 제공된 데이터\n\n"
+        "### 키워드\n"
+        f"{keywords_json}\n\n"
+        "### 주요 출처\n"
+        f"{sources_json}\n\n"
+    )
+
+    if economic_calendar_text:
+        user_prompt_parts.append(
+            f"{economic_calendar_text}\n\n"
+            "**[참고]** 위 경제 지표가 암호화폐 투자 심리에 미치는 영향을 고려하세요.\n\n"
+        )
+
+    # ========================================
+    # 2. 공통 작성 원칙
+    # ========================================
+    user_prompt_parts.append(
+        "---\n\n"
+        "## 공통 작성 원칙\n\n"
+        "### 인과관계 작성 시 주의사항\n"
+        "- ✅ 원인과 결과를 논리적으로 연결\n"
+        "- ✅ 각 단계의 전달 경로 명확히: ETF 승인 → 기관 자금 유입 → 가격 상승\n"
+        "- ✅ '~에도 불구하고'는 역접(반대) 상황에만 사용\n"
+        "- ✅ **정량적 데이터 우선**:\n"
+        "  • TVL, ETF 자금 흐름, 거래량 등 구체적 수치 사용\n"
+        "  • 추상적 표현 대신 정량적 데이터\n"
+        "- ✅ 긍정/부정 요인 명확히 구분\n"
+        "- ✅ 불확실한 인과관계는 단정 금지\n\n"
+        "### 온체인 vs 제도권 균형\n"
+        "- 두 영역의 동향을 균형있게 다룰 것\n"
+        "- 상호 연결점 강조: 예) ETF 자금 유입 → 온체인 활동 증가\n"
+        "- 한쪽 영역만 치우치지 않도록 주의\n\n"
+    )
+
+    user_prompt_base = "".join(user_prompt_parts)
+    return system_prompt, user_prompt_base
+
+
+def _build_integrated_prompt_base(
+    macro_narrative: list[str],
+    crypto_narrative: list[str],
+    all_keywords: list[dict[str, Any]],
+    economic_events: Sequence[Any] | None = None,
+) -> tuple[str, str]:
+    """
+    통합 프롬프트의 공통 부분을 구성합니다.
+
+    이 헬퍼 함수는 system_prompt와 user_prompt_base(데이터 섹션 + 작성 원칙)를 반환합니다.
+    Key Points 프롬프트와 Narrative 프롬프트에서 재사용됩니다.
+
+    Args:
+        macro_narrative: Macro 내러티브 문단 리스트
+        crypto_narrative: Crypto 내러티브 문단 리스트
+        all_keywords: 전체 키워드 리스트
+        economic_events: Economic Calendar 이벤트 (선택사항)
+
+    Returns:
+        (system_prompt, user_prompt_base) 튜플
+        - system_prompt: 역할 정의
+        - user_prompt_base: 데이터 섹션 + 공통 작성 원칙
+    """
+    keywords_json = json.dumps(
+        all_keywords[:15], ensure_ascii=False, indent=2
+    )  # 상위 15개만
+
+    system_prompt = (
+        "당신은 디지털 자산 시장 전체를 조망하는 수석 분석가입니다.\n"
+        "거시경제 환경과 암호화폐 시장 동향을 종합하여 통합적인 시장 전망을 제시하세요.\n"
+        "\n"
+        "당신의 목표는 Macro와 Crypto 내러티브를 연결하여 더 깊은 인사이트를 도출하는 것입니다.\n"
+        "당신은 트레이더로서 실제 매매에 활용할 수 있는 인사이트를 제공하세요."
+    )
+
+    macro_text = "\n".join(f"- {p}" for p in (macro_narrative or []))
+    crypto_text = "\n".join(f"- {p}" for p in (crypto_narrative or []))
+
+    # Economic Calendar 포맷팅
+    economic_calendar_text = format_economic_calendar(economic_events)
+
+    user_prompt_parts = [
+        "## 제공된 내러티브\n\n"
+        "아래 두 내러티브를 참고하여 통합 분석을 작성하세요.\n\n"
+        "### Macro (거시경제) 내러티브\n"
+        f"{macro_text if macro_text else '(내용 없음)'}\n\n"
+        "### Crypto (암호화폐) 내러티브\n"
+        f"{crypto_text if crypto_text else '(내용 없음)'}\n\n"
+        f"### 주요 키워드\n{keywords_json}\n\n"
+    ]
+
+    # Economic Calendar 추가 (있을 경우)
+    if economic_calendar_text:
+        user_prompt_parts.append(f"{economic_calendar_text}\n\n")
+
+    # 공통 작성 원칙
+    user_prompt_parts.append(
+        "---\n\n"
+        "## 공통 작성 원칙\n\n"
+        "### 통합 내러티브의 목적\n"
+        "- 단순 요약이 아닌 **두 내러티브 간의 연결고리**를 찾아 새로운 인사이트 도출\n"
+        "- 거시경제 → 암호화폐 시장으로의 **전달 경로** 명확화\n"
+        "- 투자자 관점에서 **실행 가능한 시사점** 제시\n\n"
+        "### 필수 포함 요소\n"
+        "1. **Macro-Crypto 연결고리**\n"
+        "   - 금리/인플레이션이 암호화폐 시장에 미치는 영향\n"
+        "   - 달러 강세/약세와 비트코인 가격의 상관관계\n"
+        "   - 위험자산 선호도 변화가 크립토에 미치는 영향\n"
+        '   - 예: "금리 인하 기대감 → 위험자산 선호 → ETF 자금 유입 → BTC 상승"\n\n'
+        "2. **종합 시장 전망**\n"
+        "   - 거시경제와 암호화폐 양쪽 요인을 고려한 시장 방향성\n"
+        "   - 긍정/부정 요인의 상대적 힘 평가\n"
+        "   - 단기 vs 중장기 전망 구분\n\n"
+        "3. **투자 시사점**\n"
+        "   - 현 환경에서 주목할 테마/섹터\n"
+        "   - 리스크 요인과 대응 방안\n"
+        "   - 포지셔닝 방향 (간접적 제안)\n\n"
+        "### 작성 규칙\n"
+        "- 정량적 데이터 인용 (금리, %, TVL, ETF 자금 등)\n"
+        "- 인과관계 명확: A → B → C 형태로 전달 경로 서술\n"
+        "- 단순 나열 금지: 두 내러티브를 연결하는 새로운 관점 필수\n"
+    )
+
+    user_prompt_base = "".join(user_prompt_parts)
+    return system_prompt, user_prompt_base
+
+
+def build_macro_narrative_prompt(
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
+    economic_events: Sequence[Any] | None = None,
+    key_points: list[str] | None = None,
+) -> str:
+    """
+    Macro 내러티브 프롬프트를 생성합니다.
+
+    거시경제 요인(금리, 인플레이션, 주식시장, 규제 등)에 집중한 내러티브를 생성합니다.
+    항상 2개 문단으로 고정: 문단1(과거 분석), 문단2(미래 전망)
+
+    Args:
+        keywords: Macro 카테고리 키워드 리스트
+        source_highlights: 주요 출처 하이라이트
+        economic_events: Economic Calendar 이벤트 리스트 (선택)
+        key_points: Key Points 리스트 (2단계 LLM 호출 시 사용, 선택)
+            - 제공 시 내러티브는 이 Key Points를 반드시 반영해야 함
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    # 공통 부분 재사용
+    system_prompt, user_prompt_base = _build_macro_prompt_base(
+        keywords, source_highlights, economic_events
+    )
+
+    # 문단 구성 안내 추가
+    system_prompt += (
+        "\n\n"
+        "**문단 구성**:\n"
+        "- 문단1: 과거 이벤트 분석 (발표된 경제 지표와 시장 반응)\n"
+        "- 문단2: 미래 이벤트 전망 (예정된 경제 지표와 시장 기대)"
+    )
+
+    user_prompt_parts = [user_prompt_base]
+
+    # Key Points가 제공된 경우 프롬프트에 추가
+    if key_points:
+        key_points_text = "\n".join(f"- {p}" for p in key_points)
+        user_prompt_parts.append(
+            "---\n\n"
+            "## Key Points (필수 반영)\n\n"
+            "아래 Key Points는 반드시 내러티브에 반영되어야 합니다:\n\n"
+            f"{key_points_text}\n\n"
+            "**중요**: 위 Key Points의 모든 내용을 내러티브에 포함하세요. "
+            "Key Points에 있는 정량적 데이터와 인사이트를 누락하지 마세요.\n\n"
+        )
+
+    # ========================================
+    # 문단별 작성 가이드 (Narrative 전용)
     # ========================================
     user_prompt_parts.append(
         "---\n\n"
@@ -1162,39 +1408,7 @@ def build_macro_narrative_prompt(
     )
 
     # ========================================
-    # 3. 공통 작성 원칙
-    # ========================================
-    user_prompt_parts.append(
-        "---\n\n"
-        "## 공통 작성 원칙\n\n"
-        "### 인과관계 작성 시 주의사항\n"
-        "- ✅ 원인과 결과를 논리적으로 연결: 'A로 인해 B 발생', 'A가 B를 견인'\n"
-        "- ✅ 각 단계의 전달 경로 명확히: A → B → C\n"
-        "- ✅ '~에도 불구하고'는 역접(반대) 상황에만 사용\n"
-        "- ✅ **방향성 정확히 구분**:\n"
-        "  • 매파 = 금리 인상 성향 → 달러 강세 압력\n"
-        "  • 비둘기파 = 금리 인하 성향 → 달러 약세 압력\n"
-        "  • 금리 인상 → 달러 강세, 금리 인하 → 달러 약세\n"
-        "  • 강세/약세, 상승/하락, 우려/기대 등 반대 의미 용어 혼동 금지\n"
-        "- ✅ 불확실한 인과관계는 단정 금지: '~할 가능성', '~로 해석됨' 등으로 표현\n\n"
-        "### 긍정/부정 요인 구분\n"
-        "상반된 요인이 있다면 명확히 구분하여 서술:\n"
-        "- 긍정적 요인(금리 하락, 주가 상승 압력): ...\n"
-        "- 부정적 요인(금리 상승, 주가 하락 압력): ...\n"
-        "- 최종 결과: 어느 쪽 압력이 우세했는지 명시\n\n"
-        "### 근거 및 데이터\n"
-        "- 정량적 데이터 필수 포함 (%, bp, 지수, 금액 등)\n"
-        "- 출처 명시 (Fed, Bloomberg, ECB 등)\n"
-        "- 과거 유사 사례 참조 가능\n\n"
-        "### 팩트 체크 (중요)\n"
-        "- **예정된 경제 지표 일정은 반드시 제공된 Economic Calendar 데이터에서만 인용**하세요\n"
-        "- 제공된 데이터에 없는 일정을 추측하거나 만들어내지 마세요\n"
-        "- '다음 주', '다음 달' 등 시점 언급 시 반드시 출처 확인\n"
-        "- 불확실한 일정은 언급하지 않거나 '확인 필요'로 표기\n"
-    )
-
-    # ========================================
-    # 4. 출력 형식
+    # 출력 형식
     # ========================================
     user_prompt_parts.append(
         "---\n\n"
@@ -1223,6 +1437,7 @@ def build_crypto_narrative_prompt(
     source_highlights: list[dict[str, Any]],
     num_paragraphs: int = 2,
     economic_events: Sequence[Any] | None = None,
+    key_points: list[str] | None = None,
 ) -> str:
     """
     Crypto 내러티브 프롬프트를 생성합니다.
@@ -1238,50 +1453,41 @@ def build_crypto_narrative_prompt(
         source_highlights: 주요 출처 하이라이트
         num_paragraphs: 생성할 문단 수 (기본값 2, 고정)
         economic_events: Economic Calendar 이벤트 리스트 (선택)
+        key_points: Key Points 리스트 (2단계 LLM 호출 시 사용, 선택)
+            - 제공 시 내러티브는 이 Key Points를 반드시 반영해야 함
 
     Returns:
         Gemini API 호출용 프롬프트 문자열
     """
-    import json
+    # 공통 부분 재사용
+    system_prompt, user_prompt_base = _build_crypto_prompt_base(
+        keywords, source_highlights, economic_events
+    )
 
-    keywords_json = json.dumps(keywords, ensure_ascii=False, indent=2)
-    sources_json = json.dumps(source_highlights, ensure_ascii=False, indent=2)
-    economic_calendar_text = format_economic_calendar(economic_events)
-
-    system_prompt = (
-        "당신은 암호화폐 시장 전문 분석가이자 현업 트레이더입니다.\n"
-        "온체인 데이터(DeFi, 프로토콜, TVL)와 제도권 동향(ETF, 규제, 기관투자, Crypto 정책)을 종합 분석하고,\n"
-        "시장 반응의 인과관계를 명확히 제시하세요.\n"
-        "\n"
-        "당신의 목표는 주기적으로 암호화폐 시장 시황을 작성하는 것이며, 근거를 기반으로 명확한 현황 분석 및 전망을 제시하는 것입니다.\n"
-        "당신은 트레이더이기 때문에, 실제 매매에 활용할 수 있는 분석을 제공하세요.\n"
-        "\n"
+    # 문단 구성 안내 추가
+    system_prompt += (
+        "\n\n"
         "**문단 구성**:\n"
         "- 문단1: 과거 이벤트 분석 (발생한 온체인/제도권 이벤트와 시장 반응)\n"
         "- 문단2: 미래 트렌드 전망 (예정된 업데이트/규제 변화와 시장 기대)"
     )
 
-    user_prompt_parts = []
+    user_prompt_parts = [user_prompt_base]
 
-    # ========================================
-    # 1. 데이터 제공 섹션
-    # ========================================
-    user_prompt_parts.append(
-        "## 제공된 데이터\n\n"
-        "### 키워드\n"
-        f"{keywords_json}\n\n"
-        "### 주요 출처\n"
-        f"{sources_json}\n\n"
-    )
-
-    if economic_calendar_text:
+    # Key Points가 제공된 경우 프롬프트에 추가
+    if key_points:
+        key_points_text = "\n".join(f"- {p}" for p in key_points)
         user_prompt_parts.append(
-            f"{economic_calendar_text}\n\n"
-            "**[참고]** 위 경제 지표가 암호화폐 투자 심리에 미치는 영향을 고려하세요.\n\n"
+            "---\n\n"
+            "## Key Points (필수 반영)\n\n"
+            "아래 Key Points는 반드시 내러티브에 반영되어야 합니다:\n\n"
+            f"{key_points_text}\n\n"
+            "**중요**: 위 Key Points의 모든 내용을 내러티브에 포함하세요. "
+            "Key Points에 있는 정량적 데이터와 인사이트를 누락하지 마세요.\n\n"
         )
 
     # ========================================
-    # 2. 문단별 작성 가이드
+    # 문단별 작성 가이드 (Narrative 전용)
     # ========================================
     user_prompt_parts.append(
         "---\n\n"
@@ -1347,28 +1553,7 @@ def build_crypto_narrative_prompt(
     )
 
     # ========================================
-    # 3. 공통 작성 원칙
-    # ========================================
-    user_prompt_parts.append(
-        "---\n\n"
-        "## 공통 작성 원칙\n\n"
-        "### 인과관계 작성 시 주의사항\n"
-        "- ✅ 원인과 결과를 논리적으로 연결\n"
-        "- ✅ 각 단계의 전달 경로 명확히: ETF 승인 → 기관 자금 유입 → 가격 상승\n"
-        "- ✅ '~에도 불구하고'는 역접(반대) 상황에만 사용\n"
-        "- ✅ **정량적 데이터 우선**:\n"
-        "  • TVL, ETF 자금 흐름, 거래량 등 구체적 수치 사용\n"
-        "  • 추상적 표현 대신 정량적 데이터\n"
-        "- ✅ 긍정/부정 요인 명확히 구분\n"
-        "- ✅ 불확실한 인과관계는 단정 금지\n\n"
-        "### 온체인 vs 제도권 균형\n"
-        "- 두 영역의 동향을 균형있게 다룰 것\n"
-        "- 상호 연결점 강조: 예) ETF 자금 유입 → 온체인 활동 증가\n"
-        "- 한쪽 영역만 치우치지 않도록 주의\n\n"
-    )
-
-    # ========================================
-    # 4. 출력 형식
+    # 출력 형식
     # ========================================
     user_prompt_parts.append(
         "---\n\n"
@@ -1398,10 +1583,11 @@ def build_crypto_native_narrative_prompt(
     source_highlights: list[dict[str, Any]],
     num_paragraphs: int = 2,
     economic_events: Sequence[Any] | None = None,
+    key_points: list[str] | None = None,
 ) -> str:
     """Deprecated: build_crypto_narrative_prompt를 사용하세요."""
     return build_crypto_narrative_prompt(
-        keywords, source_highlights, num_paragraphs, economic_events
+        keywords, source_highlights, num_paragraphs, economic_events, key_points
     )
 
 
@@ -1411,10 +1597,11 @@ def build_crypto_macro_narrative_prompt(
     source_highlights: list[dict[str, Any]],
     num_paragraphs: int = 2,
     economic_events: Sequence[Any] | None = None,
+    key_points: list[str] | None = None,
 ) -> str:
     """Deprecated: build_crypto_narrative_prompt를 사용하세요."""
     return build_crypto_narrative_prompt(
-        keywords, source_highlights, num_paragraphs, economic_events
+        keywords, source_highlights, num_paragraphs, economic_events, key_points
     )
 
 
@@ -1424,6 +1611,7 @@ def build_integrated_narrative_prompt(
     all_keywords: list[dict[str, Any]],
     num_paragraphs: int = 3,
     economic_events: Sequence[Any] | None = None,
+    key_points: list[str] | None = None,
     # 하위 호환성을 위한 deprecated 파라미터
     crypto_native_narrative: list[str] = None,
     crypto_macro_narrative: list[str] = None,
@@ -1439,14 +1627,14 @@ def build_integrated_narrative_prompt(
         all_keywords: 전체 키워드 리스트
         num_paragraphs: 생성할 문단 수
         economic_events: Economic Calendar 이벤트 (선택사항)
+        key_points: Key Points 리스트 (2단계 LLM 호출 시 사용, 선택)
+            - 제공 시 내러티브는 이 Key Points를 반드시 반영해야 함
         crypto_native_narrative: (deprecated) 하위 호환성용
         crypto_macro_narrative: (deprecated) 하위 호환성용
 
     Returns:
         Gemini API 호출용 프롬프트 문자열
     """
-    import json
-
     # 하위 호환성: 기존 3-카테고리 방식 호출 처리
     if crypto_native_narrative is not None or crypto_macro_narrative is not None:
         # 기존 방식으로 호출됨 - crypto_native + crypto_macro를 합쳐서 crypto로 사용
@@ -1457,65 +1645,40 @@ def build_integrated_narrative_prompt(
             combined_crypto.extend(crypto_macro_narrative)
         crypto_narrative = combined_crypto if combined_crypto else crypto_narrative
 
-    keywords_json = json.dumps(
-        all_keywords[:15], ensure_ascii=False, indent=2
-    )  # 상위 15개만
-
-    system_prompt = (
-        "당신은 디지털 자산 시장 전체를 조망하는 수석 분석가입니다.\n"
-        "거시경제 환경과 암호화폐 시장 동향을 종합하여 통합적인 시장 전망을 제시하세요.\n"
-        "\n"
-        "당신의 목표는 Macro와 Crypto 내러티브를 연결하여 더 깊은 인사이트를 도출하는 것입니다.\n"
-        "당신은 트레이더로서 실제 매매에 활용할 수 있는 인사이트를 제공하세요."
+    # 공통 부분 재사용
+    system_prompt, user_prompt_base = _build_integrated_prompt_base(
+        macro_narrative, crypto_narrative, all_keywords, economic_events
     )
 
-    macro_text = "\n".join(f"- {p}" for p in (macro_narrative or []))
-    crypto_text = "\n".join(f"- {p}" for p in (crypto_narrative or []))
+    user_prompt_parts = [user_prompt_base]
 
-    # Economic Calendar 포맷팅
-    economic_calendar_text = format_economic_calendar(economic_events)
+    # Key Points가 제공된 경우 프롬프트에 추가
+    if key_points:
+        key_points_text = "\n".join(f"- {p}" for p in key_points)
+        user_prompt_parts.append(
+            "---\n\n"
+            "## Key Points (필수 반영)\n\n"
+            "아래 Key Points는 반드시 통합 내러티브에 반영되어야 합니다:\n\n"
+            f"{key_points_text}\n\n"
+            "**중요**: 위 Key Points의 모든 내용을 내러티브에 포함하세요. "
+            "특히 Macro-Crypto 연결고리와 정량적 데이터를 누락하지 마세요.\n\n"
+        )
 
-    user_prompt_parts = [
-        "## 제공된 내러티브\n\n"
-        "아래 두 내러티브를 참고하여 통합 분석을 작성하세요.\n\n"
-        "### Macro (거시경제) 내러티브\n"
-        f"{macro_text if macro_text else '(내용 없음)'}\n\n"
-        "### Crypto (암호화폐) 내러티브\n"
-        f"{crypto_text if crypto_text else '(내용 없음)'}\n\n"
-        f"### 주요 키워드\n{keywords_json}\n\n"
-    ]
-
-    # Economic Calendar 추가 (있을 경우)
-    if economic_calendar_text:
-        user_prompt_parts.append(f"{economic_calendar_text}\n\n")
-
+    # ========================================
+    # 작성 가이드 (Narrative 전용)
+    # ========================================
     user_prompt_parts.append(
         "---\n\n"
         "## 작성 가이드\n\n"
         f"**반드시 {num_paragraphs}개 문단으로 작성**하세요.\n\n"
-        "### 통합 내러티브의 목적\n"
-        "- 단순 요약이 아닌 **두 내러티브 간의 연결고리**를 찾아 새로운 인사이트 도출\n"
-        "- 거시경제 → 암호화폐 시장으로의 **전달 경로** 명확화\n"
-        "- 투자자 관점에서 **실행 가능한 시사점** 제시\n\n"
-        "### 필수 포함 요소\n"
-        "1. **Macro-Crypto 연결고리**\n"
-        "   - 금리/인플레이션이 암호화폐 시장에 미치는 영향\n"
-        "   - 달러 강세/약세와 비트코인 가격의 상관관계\n"
-        "   - 위험자산 선호도 변화가 크립토에 미치는 영향\n"
-        '   - 예: "금리 인하 기대감 → 위험자산 선호 → ETF 자금 유입 → BTC 상승"\n\n'
-        "2. **종합 시장 전망**\n"
-        "   - 거시경제와 암호화폐 양쪽 요인을 고려한 시장 방향성\n"
-        "   - 긍정/부정 요인의 상대적 힘 평가\n"
-        "   - 단기 vs 중장기 전망 구분\n\n"
-        "3. **투자 시사점**\n"
-        "   - 현 환경에서 주목할 테마/섹터\n"
-        "   - 리스크 요인과 대응 방안\n"
-        "   - 포지셔닝 방향 (간접적 제안)\n\n"
         "### 작성 규칙\n"
         "- 각 문단 길이: 150~250자\n"
-        "- 정량적 데이터 인용 (금리, %, TVL, ETF 자금 등)\n"
-        "- 인과관계 명확: A → B → C 형태로 전달 경로 서술\n"
-        "- 단순 나열 금지: 두 내러티브를 연결하는 새로운 관점 필수\n\n"
+    )
+
+    # ========================================
+    # 출력 형식
+    # ========================================
+    user_prompt_parts.append(
         "---\n\n"
         "## 출력 형식\n\n"
         "반드시 다음 JSON 형식으로만 출력하세요:\n\n"
@@ -1669,3 +1832,364 @@ def format_economic_calendar_split(
     future_text = "\n".join(future_lines) if future_lines else ""
 
     return past_text, future_text
+
+
+# ============================================================================
+# Key Points 생성 프롬프트 (2단계 LLM 호출 방식 - Phase 3)
+# ============================================================================
+
+
+def build_macro_keypoints_prompt(
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
+    economic_events: Sequence[Any] | None = None,
+) -> str:
+    """
+    Macro Key Points 생성 프롬프트를 구성합니다.
+
+    1단계 LLM 호출에서 사용되며, 핵심 포인트와 소스 매핑을 생성합니다.
+    _build_macro_prompt_base()를 재사용하여 공통 부분을 활용합니다.
+
+    Args:
+        keywords: Macro 카테고리 키워드 리스트
+        source_highlights: 주요 출처 하이라이트
+        economic_events: Economic Calendar 이벤트 리스트 (선택)
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    # 공통 부분 재사용
+    system_prompt, user_prompt_base = _build_macro_prompt_base(
+        keywords, source_highlights, economic_events
+    )
+
+    # Key Points 전용 시스템 프롬프트 추가
+    system_prompt += (
+        "\n\n"
+        "**목표**: 주어진 데이터에서 핵심 포인트(Key Points)를 추출합니다.\n"
+        "Key Points는 이후 내러티브 생성의 기반이 되므로, 정확하고 정량적인 정보를 포함해야 합니다."
+    )
+
+    user_prompt_parts = [user_prompt_base]
+
+    # Key Points 작성 가이드
+    user_prompt_parts.append(
+        "---\n\n"
+        "## Key Points 작성 가이드\n\n"
+        "### Key Points란?\n"
+        "- 내러티브 작성의 기반이 되는 핵심 정보입니다\n"
+        "- 각 포인트는 독립적으로 의미를 전달해야 합니다\n"
+        "- 정량적 데이터를 반드시 포함하세요 (%, bp, 지수, 금액 등)\n\n"
+        "### 작성 규칙\n"
+        "- **개수**: 5~20개 (데이터 양에 따라 유동적으로 결정)\n"
+        "- **중요도순 정렬**: 가장 중요한 포인트를 먼저 나열\n"
+        "- **정량적 데이터 필수**: 각 포인트에 최소 1개 이상의 수치 포함\n"
+        "- **소스 매핑**: 각 포인트가 어느 소스에서 추출되었는지 명시\n"
+        "- **간결성**: 각 포인트는 1~2문장으로 구성\n\n"
+        "### 포함해야 할 내용\n"
+        "1. 주요 경제 지표 발표 및 결과\n"
+        "2. 중앙은행 정책 변화 및 발언\n"
+        "3. 금리/주식/환율/상품 시장 반응\n"
+        "4. 향후 예정된 주요 이벤트\n"
+        "5. 시장 간 상호작용 및 인과관계\n\n"
+    )
+
+    # 출력 형식
+    user_prompt_parts.append(
+        "---\n\n"
+        "## 출력 형식\n\n"
+        "반드시 다음 JSON 형식으로만 출력하세요:\n\n"
+        "```json\n"
+        "{\n"
+        '  "key_points": [\n'
+        '    "미국 11월 CPI는 2.7%(예상 2.6%)로 예상을 상회하며 인플레이션 재가속 우려 부각",\n'
+        '    "10년물 국채 수익률 4.2%로 10bp 상승, 금리 인하 기대 후퇴",\n'
+        '    "Fed 금리 인하 확률 CME FedWatch 기준 65%로 전주 대비 10%p 하락",\n'
+        "    ...\n"
+        "  ],\n"
+        '  "source_mapping": {\n'
+        '    "0": [1, 5, 12],\n'
+        '    "1": [3, 8],\n'
+        '    "2": [2, 7, 15],\n'
+        "    ...\n"
+        "  }\n"
+        "}\n"
+        "```\n\n"
+        "**중요**:\n"
+        "- key_points: 5~20개의 핵심 포인트 (중요도순)\n"
+        "- source_mapping: 각 포인트 인덱스 → 관련 소스 ID 리스트\n"
+        "- JSON 형식 외 다른 텍스트 출력 금지\n"
+    )
+
+    user_prompt = "".join(user_prompt_parts)
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def build_crypto_keypoints_prompt(
+    keywords: list[dict[str, Any]],
+    source_highlights: list[dict[str, Any]],
+    economic_events: Sequence[Any] | None = None,
+) -> str:
+    """
+    Crypto Key Points 생성 프롬프트를 구성합니다.
+
+    1단계 LLM 호출에서 사용되며, 핵심 포인트와 소스 매핑을 생성합니다.
+    _build_crypto_prompt_base()를 재사용하여 공통 부분을 활용합니다.
+
+    Args:
+        keywords: Crypto 카테고리 키워드 리스트
+        source_highlights: 주요 출처 하이라이트
+        economic_events: Economic Calendar 이벤트 리스트 (선택)
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    # 공통 부분 재사용
+    system_prompt, user_prompt_base = _build_crypto_prompt_base(
+        keywords, source_highlights, economic_events
+    )
+
+    # Key Points 전용 시스템 프롬프트 추가
+    system_prompt += (
+        "\n\n"
+        "**목표**: 주어진 데이터에서 핵심 포인트(Key Points)를 추출합니다.\n"
+        "Key Points는 이후 내러티브 생성의 기반이 되므로, 정확하고 정량적인 정보를 포함해야 합니다."
+    )
+
+    user_prompt_parts = [user_prompt_base]
+
+    # Key Points 작성 가이드
+    user_prompt_parts.append(
+        "---\n\n"
+        "## Key Points 작성 가이드\n\n"
+        "### Key Points란?\n"
+        "- 내러티브 작성의 기반이 되는 핵심 정보입니다\n"
+        "- 각 포인트는 독립적으로 의미를 전달해야 합니다\n"
+        "- 정량적 데이터를 반드시 포함하세요 (TVL, %, 자금 흐름, 거래량 등)\n\n"
+        "### 작성 규칙\n"
+        "- **개수**: 5~20개 (데이터 양에 따라 유동적으로 결정)\n"
+        "- **중요도순 정렬**: 가장 중요한 포인트를 먼저 나열\n"
+        "- **정량적 데이터 필수**: 각 포인트에 최소 1개 이상의 수치 포함\n"
+        "- **소스 매핑**: 각 포인트가 어느 소스에서 추출되었는지 명시\n"
+        "- **간결성**: 각 포인트는 1~2문장으로 구성\n\n"
+        "### 포함해야 할 내용 (온체인 + 제도권 균형)\n"
+        "1. **온체인 동향**: TVL 변동, 프로토콜 업데이트, DeFi 트렌드\n"
+        "2. **제도권 동향**: ETF 자금 흐름, 기관 투자, 규제 변화\n"
+        "3. **가격 및 거래량**: 주요 코인 가격 변동, 거래량 변화\n"
+        "4. **향후 이벤트**: 예정된 업그레이드, 토큰 언락, 규제 일정\n"
+        "5. **시장 심리**: 공포/탐욕 지수, 소셜 센티먼트\n\n"
+    )
+
+    # 출력 형식
+    user_prompt_parts.append(
+        "---\n\n"
+        "## 출력 형식\n\n"
+        "반드시 다음 JSON 형식으로만 출력하세요:\n\n"
+        "```json\n"
+        "{\n"
+        '  "key_points": [\n'
+        '    "비트코인 현물 ETF에서 3억 달러 순유입, 기관 매수세 지속",\n'
+        '    "이더리움 Pectra 업그레이드 테스트넷 성공, 메인넷 Q1 적용 예정",\n'
+        '    "Arbitrum TVL 150억 달러로 15% 증가, L2 경쟁 심화",\n'
+        "    ...\n"
+        "  ],\n"
+        '  "source_mapping": {\n'
+        '    "0": [2, 6, 11],\n'
+        '    "1": [4, 9],\n'
+        '    "2": [1, 5, 13],\n'
+        "    ...\n"
+        "  }\n"
+        "}\n"
+        "```\n\n"
+        "**중요**:\n"
+        "- key_points: 5~20개의 핵심 포인트 (중요도순)\n"
+        "- source_mapping: 각 포인트 인덱스 → 관련 소스 ID 리스트\n"
+        "- 온체인과 제도권 동향을 균형있게 포함\n"
+        "- JSON 형식 외 다른 텍스트 출력 금지\n"
+    )
+
+    user_prompt = "".join(user_prompt_parts)
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def build_integrated_keypoints_prompt(
+    macro_key_points: list[str],
+    crypto_key_points: list[str],
+    all_keywords: list[dict[str, Any]],
+    economic_events: Sequence[Any] | None = None,
+) -> str:
+    """
+    통합 Key Points 생성 프롬프트를 구성합니다.
+
+    Macro와 Crypto의 Key Points를 입력받아 통합된 Key Points를 생성합니다.
+    두 영역 간의 연결고리를 찾아 새로운 인사이트를 도출합니다.
+
+    Args:
+        macro_key_points: Macro Key Points 리스트
+        crypto_key_points: Crypto Key Points 리스트
+        all_keywords: 전체 키워드 리스트
+        economic_events: Economic Calendar 이벤트 (선택)
+
+    Returns:
+        Gemini API 호출용 프롬프트 문자열
+    """
+    keywords_json = json.dumps(
+        all_keywords[:15], ensure_ascii=False, indent=2
+    )  # 상위 15개만
+
+    system_prompt = (
+        "당신은 디지털 자산 시장 전체를 조망하는 수석 분석가입니다.\n"
+        "거시경제와 암호화폐 시장의 연결고리를 찾아 통합적인 인사이트를 도출하세요.\n"
+        "\n"
+        "**목표**: Macro와 Crypto Key Points를 종합하여 통합 Key Points를 생성합니다.\n"
+        "단순 요약이 아닌, 두 영역 간의 연결고리와 새로운 인사이트를 찾아야 합니다."
+    )
+
+    macro_text = "\n".join(f"- {p}" for p in (macro_key_points or []))
+    crypto_text = "\n".join(f"- {p}" for p in (crypto_key_points or []))
+
+    # Economic Calendar 포맷팅
+    economic_calendar_text = format_economic_calendar(economic_events)
+
+    user_prompt_parts = [
+        "## 제공된 Key Points\n\n"
+        "### Macro (거시경제) Key Points\n"
+        f"{macro_text if macro_text else '(내용 없음)'}\n\n"
+        "### Crypto (암호화폐) Key Points\n"
+        f"{crypto_text if crypto_text else '(내용 없음)'}\n\n"
+        f"### 주요 키워드\n{keywords_json}\n\n"
+    ]
+
+    # Economic Calendar 추가 (있을 경우)
+    if economic_calendar_text:
+        user_prompt_parts.append(f"{economic_calendar_text}\n\n")
+
+    # Key Points 작성 가이드
+    user_prompt_parts.append(
+        "---\n\n"
+        "## 통합 Key Points 작성 가이드\n\n"
+        "### 통합 Key Points의 목적\n"
+        "- 단순 합치기가 아닌 **두 영역 간의 연결고리** 도출\n"
+        "- 거시경제 → 암호화폐로의 **전달 경로** 명확화\n"
+        "- 투자자 관점에서 **실행 가능한 시사점** 제시\n\n"
+        "### 작성 규칙\n"
+        "- **개수**: 5~15개 (핵심만 선별)\n"
+        "- **중요도순 정렬**: 가장 중요한 포인트를 먼저 나열\n"
+        "- **연결고리 강조**: Macro-Crypto 간 인과관계 명시\n"
+        "- **정량적 데이터 포함**: 각 포인트에 수치 포함\n\n"
+        "### 필수 포함 요소\n"
+        "1. **Macro-Crypto 연결고리**\n"
+        '   - 예: "금리 인하 기대감 → 위험자산 선호 → ETF 자금 유입 → BTC 상승"\n'
+        "2. **종합 시장 방향성**\n"
+        "   - 긍정/부정 요인의 상대적 힘 평가\n"
+        "3. **투자 시사점**\n"
+        "   - 주목할 테마/섹터, 리스크 요인\n\n"
+    )
+
+    # 출력 형식
+    user_prompt_parts.append(
+        "---\n\n"
+        "## 출력 형식\n\n"
+        "반드시 다음 JSON 형식으로만 출력하세요:\n\n"
+        "```json\n"
+        "{\n"
+        '  "key_points": [\n'
+        '    "Fed 금리 인하 기대 후퇴로 위험자산 선호 약화, BTC ETF 유입 둔화 예상",\n'
+        '    "달러 강세 지속 시 BTC/USD 하방 압력 증가, 지지선 $90K 주목",\n'
+        '    "그러나 온체인 활동 증가와 기관 매수세는 긍정적, 중기 상승 관점 유지",\n'
+        "    ...\n"
+        "  ],\n"
+        '  "source_mapping": {\n'
+        '    "0": ["macro_0", "macro_2", "crypto_1"],\n'
+        '    "1": ["macro_1", "crypto_3"],\n'
+        '    "2": ["crypto_0", "crypto_2", "crypto_5"],\n'
+        "    ...\n"
+        "  }\n"
+        "}\n"
+        "```\n\n"
+        "**중요**:\n"
+        "- key_points: 5~15개의 통합 핵심 포인트 (중요도순)\n"
+        '- source_mapping: 각 포인트가 참조한 원본 Key Point ("macro_인덱스" 또는 "crypto_인덱스")\n'
+        "- Macro-Crypto 연결고리를 반드시 포함\n"
+        "- JSON 형식 외 다른 텍스트 출력 금지\n"
+    )
+
+    user_prompt = "".join(user_prompt_parts)
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def parse_keypoints_response(
+    response_text: str, category: str = "Key Points"
+) -> dict[str, Any]:
+    """
+    Key Points 응답을 파싱하고 유효성을 검증합니다.
+
+    Args:
+        response_text: LLM 응답 텍스트
+        category: 카테고리 이름 (에러 메시지용)
+
+    Returns:
+        파싱된 Key Points 딕셔너리
+        {
+            "key_points": ["포인트1", "포인트2", ...],
+            "source_mapping": {"0": [1, 2], "1": [3], ...}
+        }
+
+    Raises:
+        ValueError: 응답 구조가 예상과 다르거나 유효성 검증 실패 시
+    """
+    result = parse_json_from_llm_response(
+        response_text, context=f"{category} 응답"
+    )
+
+    # key_points 필드 검증
+    if "key_points" not in result:
+        raise ValueError(f"{category} 응답에 'key_points' 필드가 없습니다.")
+
+    key_points = result.get("key_points")
+    if not isinstance(key_points, list):
+        raise ValueError(f"'{category} key_points'는 리스트여야 합니다.")
+
+    # 빈 문자열 제거 및 정규화
+    normalized_key_points = [
+        str(point).strip() for point in key_points if str(point).strip()
+    ]
+
+    if not normalized_key_points:
+        raise ValueError(f"'{category} key_points'에 유효한 포인트가 없습니다.")
+
+    # 개수 검증 (5~20개 범위, 경고만 표시)
+    point_count = len(normalized_key_points)
+    if point_count < 5:
+        logger.warning(
+            f"[parse_keypoints_response] {category}: Key Points 개수가 최소 권장(5개) 미만입니다: {point_count}개"
+        )
+    elif point_count > 20:
+        logger.warning(
+            f"[parse_keypoints_response] {category}: Key Points 개수가 최대 권장(20개) 초과입니다: {point_count}개"
+        )
+
+    # source_mapping 필드 검증 (선택적)
+    source_mapping_raw = result.get("source_mapping", {})
+    if not isinstance(source_mapping_raw, dict):
+        logger.warning(
+            f"[parse_keypoints_response] {category}: 'source_mapping'이 딕셔너리가 아닙니다. 빈 딕셔너리로 대체합니다."
+        )
+        source_mapping_raw = {}
+
+    # source_mapping 정규화
+    source_mapping: dict[str, list[Any]] = {}
+    for key, value in source_mapping_raw.items():
+        str_key = str(key)
+        if isinstance(value, list):
+            source_mapping[str_key] = value
+        else:
+            logger.warning(
+                f"[parse_keypoints_response] {category}: source_mapping['{key}']가 리스트가 아닙니다: {type(value)}"
+            )
+            source_mapping[str_key] = []
+
+    return {
+        "key_points": normalized_key_points,
+        "source_mapping": source_mapping,
+    }

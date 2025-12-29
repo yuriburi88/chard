@@ -92,9 +92,17 @@ class NormalizationConfig:
 
 @dataclass
 class NarrativeConfig:
-    """내러티브 세분화 설정"""
+    """내러티브 세분화 설정
 
-    enable_segmentation: bool = True  # 내러티브 세분화 활성화
+    2단계 Key Points 기반 내러티브 생성 방식을 사용합니다.
+    1단계: Key Points 생성 (5~20개)
+    2단계: Key Points 기반 Narrative 생성
+    """
+
+    # DEPRECATED: 이 설정은 더 이상 사용되지 않습니다.
+    # 2단계 Key Points 기반 내러티브 생성 방식이 항상 사용됩니다.
+    # 향후 버전에서 제거될 예정입니다.
+    enable_segmentation: bool = True  # DEPRECATED - 항상 true로 동작
     macro_paragraphs: int = 2  # Macro 내러티브 문단 수
     crypto_native_paragraphs: int = 2  # Crypto Native 내러티브 문단 수
     crypto_macro_paragraphs: int = 2  # Crypto-Macro 내러티브 문단 수
