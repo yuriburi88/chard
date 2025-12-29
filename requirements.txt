@@ -46,3 +46,10 @@ tenacity>=8.2.0
 
 # MCP (Model Context Protocol)
 mcp>=0.1.0
+
+# Slack 연동
+slack-sdk>=3.0.0
+slack-bolt>=1.18.0
+
+# Claude API (Anthropic)
+anthropic>=0.18.0

@@ -9,7 +9,8 @@
 3. [텔레그램 설정 (선택사항)](#텔레그램-설정-선택사항)
 4. [프로그램 실행하기](#프로그램-실행하기)
 5. [결과 확인하기](#결과-확인하기)
-6. [문제 해결](#문제-해결)
+6. [Slack Bot 실행하기](#slack-bot-실행하기)
+7. [문제 해결](#문제-해결)
 
 ---
 
@@ -283,6 +284,111 @@ output/
 ### JSON 리포트 확인
 
 JSON 리포트는 프로그램에서 자동으로 처리할 때 사용됩니다. 일반 사용자는 Markdown 리포트만 확인하면 됩니다.
+
+---
+
+## Slack Bot 실행하기
+
+Slack에서 자연어로 CHARD AI와 대화하며 시장 분석을 요청할 수 있습니다.
+
+### 1단계: Slack App 생성
+
+1. [api.slack.com/apps](https://api.slack.com/apps)에서 **Create New App** 클릭
+2. **From scratch** 선택
+3. App 이름 입력 (예: `CHARD`) 및 Workspace 선택
+4. **Create App** 클릭
+
+### 2단계: Bot 권한 설정
+
+**OAuth & Permissions** 메뉴에서 Bot Token Scopes 추가:
+
+```
+app_mentions:read     - @CHARD 멘션 감지
+chat:write            - 메시지 전송
+files:write           - 파일 업로드
+im:history            - DM 읽기
+im:read               - DM 채널 접근
+im:write              - DM 전송
+users:read            - 사용자 정보 조회
+```
+
+### 3단계: Socket Mode 활성화
+
+1. **Socket Mode** 메뉴 → **Enable Socket Mode** 켜기
+2. App-Level Token 생성 (Scope: `connections:write`)
+3. 생성된 **App Token** 복사 (`xapp-`로 시작)
+
+### 4단계: Event Subscriptions 설정
+
+**Event Subscriptions** 메뉴:
+1. **Enable Events** 켜기
+2. **Subscribe to bot events** 추가:
+   - `app_mention` - 봇 멘션 시 이벤트
+   - `message.im` - DM 메시지 이벤트
+   - `app_home_opened` - 앱 홈 탭 이벤트
+
+### 5단계: App 설치 및 토큰 복사
+
+1. **Install to Workspace** 클릭하여 앱 설치
+2. **Bot User OAuth Token** 복사 (`xoxb-`로 시작)
+
+### 6단계: 환경변수 설정
+
+프로젝트 루트 또는 `config/` 폴더의 `.env` 파일에 추가:
+
+```env
+# Slack Bot 설정
+SLACK_BOT_TOKEN=xoxb-your-bot-token-here
+SLACK_APP_TOKEN=xapp-your-app-token-here
+
+# Claude API (Anthropic)
+ANTHROPIC_API_KEY=sk-ant-your-api-key-here
+```
+
+### 7단계: Bot 실행
+
+```cmd
+python run_slack_bot.py
+```
+
+성공 시 출력:
+```
+==================================================
+CHARD Slack Bot 시작
+Socket Mode로 연결 중...
+Claude API 연동 활성화
+파일 첨부 기능 활성화
+==================================================
+```
+
+### 8단계: Slack에서 사용
+
+1. 채널에 Bot 초대: `/invite @CHARD`
+2. 멘션하여 대화: `@CHARD 오늘 시황 어때?`
+
+**사용 예시:**
+```
+@CHARD 시황 알려줘          → 전체 시장 분석
+@CHARD 비트코인 분석해줘     → 키워드 필터 분석
+@CHARD RSS만 분석해줘       → 소스 필터 분석
+@CHARD 키워드 알려줘        → 트렌딩 키워드 조회
+@CHARD 왜 이게 1위야?       → 후속 질문 (맥락 유지)
+```
+
+### Slack Bot 문제 해결
+
+**"SLACK_BOT_TOKEN 환경변수가 설정되지 않았습니다" 오류**
+- `.env` 파일에 `SLACK_BOT_TOKEN` 설정 확인
+- 토큰이 `xoxb-`로 시작하는지 확인
+
+**"SLACK_APP_TOKEN is required for Socket Mode" 오류**
+- Socket Mode가 활성화되어 있는지 확인
+- App-Level Token이 `xapp-`로 시작하는지 확인
+
+**Bot이 응답하지 않음**
+- Bot이 채널에 초대되어 있는지 확인
+- Event Subscriptions에서 `app_mention` 이벤트가 등록되어 있는지 확인
+- 콘솔에 에러 메시지가 있는지 확인
 
 ---
 
